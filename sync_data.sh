@@ -150,8 +150,12 @@ else
         log ">>> 决定使用最新备份: $TARGET_FILE (来源: $SOURCE_TYPE)"
         
         case "$SOURCE_TYPE" in
-            "S3_MAIN") download_s3_file "$S3_ENDPOINT_URL" "$S3_BUCKET" "$S3_ACCESS_KEY_ID" "$S3_SECRET_ACCESS_KEY" "$TARGET_FILE" "$DL_FILE" ;;
-            "S3_SEC")  download_s3_file "$S3_2_ENDPOINT_URL" "$S3_2_BUCKET" "$S3_2_ACCESS_KEY_ID" "$S3_2_SECRET_ACCESS_KEY" "$TARGET_FILE" "$DL_FILE" ;;
+            "S3_MAIN") 
+            export AWS_DEFAULT_REGION="us-004" 
+            download_s3_file "$S3_ENDPOINT_URL" "$S3_BUCKET" "$S3_ACCESS_KEY_ID" "$S3_SECRET_ACCESS_KEY" "$TARGET_FILE" "$DL_FILE" ;;
+            "S3_SEC")  
+            export AWS_DEFAULT_REGION="auto"
+            download_s3_file "$S3_2_ENDPOINT_URL" "$S3_2_BUCKET" "$S3_2_ACCESS_KEY_ID" "$S3_2_SECRET_ACCESS_KEY" "$TARGET_FILE" "$DL_FILE" ;;
             "WEBDAV")  download_webdav_file "$TARGET_FILE" "$DL_FILE" ;;
         esac
         
@@ -185,7 +189,7 @@ fi
             if has_s3; then
                 export AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY_ID"
                 export AWS_SECRET_ACCESS_KEY="$S3_SECRET_ACCESS_KEY"
-                export AWS_DEFAULT_REGION="auto"
+                export AWS_DEFAULT_REGION="us-004"
                 run_with_timeout "$TIMEOUT_CMD" aws --endpoint-url "$S3_ENDPOINT_URL" s3 cp "$TMP_BAK" "s3://$S3_BUCKET/$BACKUP_NAME" --quiet >/dev/null 2>&1
                 FILES=$(aws --endpoint-url "$S3_ENDPOINT_URL" s3 ls "s3://$S3_BUCKET/" | awk '{print $4}' | grep 'landppt_backup_' | sort)
                 COUNT=$(echo "$FILES" | wc -l)

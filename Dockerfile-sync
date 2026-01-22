@@ -36,9 +36,9 @@ COPY src/ ./src/
 # Install Python dependencies using uv
 # 【关键】在这里安装 webdavclient3 和 requests，确保它们进入虚拟环境
 RUN uv sync --frozen --no-dev --extra-index-url=https://pypi.apryse.com && \
-    uv pip install webdavclient3 requests && \
+    uv pip install --python /opt/venv/bin/python webdavclient3 requests && \
     # Verify key packages are installed
-    /opt/venv/bin/python -c "import uvicorn; import playwright; import fastapi; import webdav3" && \
+    /opt/venv/bin/python -c "import uvicorn; import playwright; import fastapi; import webdav3; print('Build stage: webdav3 installed successfully')" && \
     # Clean up build artifacts
     find /opt/venv -name "*.pyc" -delete && \
     find /opt/venv -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true

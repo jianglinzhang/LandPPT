@@ -25,25 +25,25 @@ RUN apt-get update && \
     libatomic1 \
     && rm -rf /var/lib/apt/lists/*
 
-# Install uv for faster dependency management
+# Install uv
 RUN pip install --no-cache-dir uv
 
-# Set work directory and copy dependency files
+# Set work directory
 WORKDIR /app
 COPY pyproject.toml uv.lock* uv.toml README.md ./
 COPY src/ ./src/
 
 # Install Python dependencies using uv
-# 【关键】在这里安装 webdavclient3 和 requests，确保它们进入虚拟环境
+# 【关键修改 1】在这里安装 awscli，让 uv 解决它和 requests/urllib3 的依赖关系
 RUN uv sync --frozen --no-dev --extra-index-url=https://pypi.apryse.com && \
-    uv pip install --python /opt/venv/bin/python webdavclient3 requests && \
-    # Verify key packages are installed
-    /opt/venv/bin/python -c "import uvicorn; import playwright; import fastapi; import webdav3; print('Build stage: webdav3 installed successfully')" && \
-    # Clean up build artifacts
+    uv pip install --python /opt/venv/bin/python webdavclient3 requests awscli && \
+    # 验证安装
+    /opt/venv/bin/python -c "import awscli; print('Build stage: awscli installed successfully')" && \
+    # Clean up
     find /opt/venv -name "*.pyc" -delete && \
     find /opt/venv -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 
-# Install Playwright browsers in builder stage
+# Install Playwright browsers
 RUN set -eux; \
     mkdir -p /opt/playwright-browsers; \
     /opt/venv/bin/python -c "from importlib.metadata import version; print('Playwright version:', version('playwright'))"; \
@@ -71,13 +71,14 @@ ENV PYTHONUNBUFFERED=1 \
     HOME=/root \
     VIRTUAL_ENV=/opt/venv
 
-# Install essential runtime dependencies and wkhtmltopdf
+# Install essential runtime dependencies
+# 【关键修改 2】从 apt 列表中删除了 awscli
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    awscli \
     coreutils \
     curl \
     wget \
+    # Wkhtmltopdf dependencies
     poppler-utils \
     libmagic1 \
     ca-certificates \
@@ -94,6 +95,7 @@ RUN apt-get update && \
     libfontconfig1 \
     libx11-6 \
     libxext6 \
+    # Chromium/Playwright dependencies
     libnss3 \
     libatk1.0-0 \
     libatk-bridge2.0-0 \
@@ -123,12 +125,12 @@ RUN apt-get update && \
 RUN groupadd -r landppt && \
     useradd -r -g landppt -m -d /home/landppt landppt
 
-# Copy Python packages from builder
+# Copy Python packages from builder (包含了 awscli)
 COPY --from=builder /opt/venv /opt/venv
-# Copy Playwright browsers from builder
+# Copy Playwright browsers
 COPY --from=builder /opt/playwright-browsers /opt/playwright-browsers
 
-# Create symlink for python3 just in case
+# Create symlink for python3
 RUN ln -sf /opt/venv/bin/python /opt/venv/bin/python3
 
 # Set permissions
@@ -146,8 +148,7 @@ COPY docker-healthcheck.sh docker-entrypoint.sh ./
 COPY .env.example ./.env
 COPY sync_data.sh /app/sync_data.sh
 
-# Create directories, set permissions, and inject sync script
-# 【关键】sed -i 's/\r$//' /app/sync_data.sh 用于修复 Windows 换行符导致的 EOF 报错
+# Inject sync script
 RUN sed -i 's/\r$//' /app/sync_data.sh && \
     chmod +x docker-healthcheck.sh docker-entrypoint.sh /app/sync_data.sh && \
     mkdir -p temp/ai_responses_cache temp/style_genes_cache temp/summeryanyfile_cache temp/templates_cache \
@@ -155,7 +156,6 @@ RUN sed -i 's/\r$//' /app/sync_data.sh && \
     chown -R landppt:landppt /app /home/landppt && \
     chmod -R 755 /app /home/landppt && \
     chmod 666 /app/.env && \
-    # 注入 sync_data.sh 到 entrypoint
     sed -i '/exec "$@"/i /app/sync_data.sh' /app/docker-entrypoint.sh
 
 # Expose port

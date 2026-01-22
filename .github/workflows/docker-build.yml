@@ -95,7 +95,6 @@ jobs:
         with:
           images: |
             ghcr.io/${{ github.repository_owner }}/${{ env.IMAGE_NAME }}
-            ${{ secrets.DOCKERHUB_USERNAME }}/${{ env.IMAGE_NAME }}
           tags: |
             # 最新标签（仅在 main/master 分支）
             type=raw,value=latest,enable={{is_default_branch}}

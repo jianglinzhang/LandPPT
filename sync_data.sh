@@ -1,15 +1,16 @@
 #!/bin/bash
 # ==============================================================================
-# landppt 多源备份脚本 (Debug 版)
+# landppt 多源备份脚本 (修复版 v3)
+# 修复：S3 Addressing Style 问题，开启详细日志
 # ==============================================================================
 
-# 1. 强制指定 Python 解释器绝对路径 (这是 Dockerfile 里 uv 创建的环境)
+# 1. 强制指定 Python 解释器绝对路径
 PYTHON_EXEC="/opt/venv/bin/python"
 
-# 2. 调试：检查环境是否正确 (如果这里报错，说明镜像没打好)
+# 2. 调试环境
 echo "[Debug] Checking Python environment..."
-$PYTHON_EXEC -c "import sys; print(f'Python Executable: {sys.executable}'); print(f'Python Path: {sys.path}')"
-$PYTHON_EXEC -c "import webdav3; print('Success: webdav3 module found!')" || { echo "[Error] webdav3 module NOT found in $PYTHON_EXEC"; exit 1; }
+$PYTHON_EXEC -c "import sys; print(f'Python Executable: {sys.executable}')"
+$PYTHON_EXEC -c "import webdav3; print('Success: webdav3 module found!')" || { echo "[Error] webdav3 module NOT found"; exit 1; }
 
 # ----------------- 配置 -----------------
 DATA_DIR="."
@@ -42,8 +43,6 @@ extract_db() {
     local tar_path="$1"
     [ ! -f "$tar_path" ] && return 1
     mkdir -p "$DATA_DIR"
-    
-    # 使用绝对路径执行
     $PYTHON_EXEC -c "
 import sys, tarfile, os, shutil
 try:
@@ -65,13 +64,14 @@ get_s3_latest_name() {
     local ENDPOINT="$1" BUCKET="$2" ACCESS="$3" SECRET="$4"
     export AWS_ACCESS_KEY_ID="$ACCESS"
     export AWS_SECRET_ACCESS_KEY="$SECRET"
-    export AWS_DEFAULT_REGION="auto"
-    run_with_timeout 20 aws --endpoint-url "$ENDPOINT" s3 ls "s3://$BUCKET/" 2>/dev/null \
+    export AWS_DEFAULT_REGION="us-004"  # 强制指定
+    
+    # 列表操作通常不需要 path style，但加上也无妨
+    run_with_timeout 20 aws --endpoint-url "$ENDPOINT" s3 ls "s3://$BUCKET/" --no-verify-ssl 2>/dev/null \
         | awk '{print $4}' | grep 'landppt_backup_' | sort | tail -n 1
 }
 
 get_webdav_latest_name() {
-    # 使用绝对路径执行
     $PYTHON_EXEC -c "
 import os, sys
 from webdav3.client import Client
@@ -97,14 +97,16 @@ download_s3_file() {
     log "从 S3 下载: $FILE ..."
     export AWS_ACCESS_KEY_ID="$ACCESS"
     export AWS_SECRET_ACCESS_KEY="$SECRET"
-    export AWS_DEFAULT_REGION="auto"
-    run_with_timeout "$TIMEOUT_RESTORE" aws --endpoint-url "$ENDPOINT" s3 cp "s3://$BUCKET/$FILE" "$DL_PATH" --quiet
+    export AWS_DEFAULT_REGION="us-004"
+    
+    # 【修复重点】添加 --addressing-style path 并移除 --quiet
+    run_with_timeout "$TIMEOUT_RESTORE" aws --endpoint-url "$ENDPOINT" s3 cp "s3://$BUCKET/$FILE" "$DL_PATH" \
+        --addressing-style path --no-progress
 }
 
 download_webdav_file() {
     local FILE="$1" DL_PATH="$2"
     log "从 WebDAV 下载: $FILE ..."
-    # 使用绝对路径执行
     $PYTHON_EXEC -c "
 import requests, os, sys
 hostname = '$WEBDAV_URL'
@@ -150,12 +152,8 @@ else
         log ">>> 决定使用最新备份: $TARGET_FILE (来源: $SOURCE_TYPE)"
         
         case "$SOURCE_TYPE" in
-            "S3_MAIN") 
-            export AWS_DEFAULT_REGION="us-004" 
-            download_s3_file "$S3_ENDPOINT_URL" "$S3_BUCKET" "$S3_ACCESS_KEY_ID" "$S3_SECRET_ACCESS_KEY" "$TARGET_FILE" "$DL_FILE" ;;
-            "S3_SEC")  
-            export AWS_DEFAULT_REGION="auto"
-            download_s3_file "$S3_2_ENDPOINT_URL" "$S3_2_BUCKET" "$S3_2_ACCESS_KEY_ID" "$S3_2_SECRET_ACCESS_KEY" "$TARGET_FILE" "$DL_FILE" ;;
+            "S3_MAIN") download_s3_file "$S3_ENDPOINT_URL" "$S3_BUCKET" "$S3_ACCESS_KEY_ID" "$S3_SECRET_ACCESS_KEY" "$TARGET_FILE" "$DL_FILE" ;;
+            "S3_SEC")  download_s3_file "$S3_2_ENDPOINT_URL" "$S3_2_BUCKET" "$S3_2_ACCESS_KEY_ID" "$S3_2_SECRET_ACCESS_KEY" "$TARGET_FILE" "$DL_FILE" ;;
             "WEBDAV")  download_webdav_file "$TARGET_FILE" "$DL_FILE" ;;
         esac
         
@@ -190,7 +188,11 @@ fi
                 export AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY_ID"
                 export AWS_SECRET_ACCESS_KEY="$S3_SECRET_ACCESS_KEY"
                 export AWS_DEFAULT_REGION="us-004"
-                run_with_timeout "$TIMEOUT_CMD" aws --endpoint-url "$S3_ENDPOINT_URL" s3 cp "$TMP_BAK" "s3://$S3_BUCKET/$BACKUP_NAME" --quiet >/dev/null 2>&1
+                
+                # 【同步修改】上传也要加 --addressing-style path
+                run_with_timeout "$TIMEOUT_CMD" aws --endpoint-url "$S3_ENDPOINT_URL" s3 cp "$TMP_BAK" "s3://$S3_BUCKET/$BACKUP_NAME" --addressing-style path --no-progress >/dev/null 2>&1
+                
+                # 清理旧备份
                 FILES=$(aws --endpoint-url "$S3_ENDPOINT_URL" s3 ls "s3://$S3_BUCKET/" | awk '{print $4}' | grep 'landppt_backup_' | sort)
                 COUNT=$(echo "$FILES" | wc -l)
                 if [ "$COUNT" -gt "$BACKUP_KEEP" ]; then
@@ -203,8 +205,8 @@ fi
             if has_s3_2; then
                 export AWS_ACCESS_KEY_ID="$S3_2_ACCESS_KEY_ID"
                 export AWS_SECRET_ACCESS_KEY="$S3_2_SECRET_ACCESS_KEY"
-                export AWS_DEFAULT_REGION="auto"
-                run_with_timeout "$TIMEOUT_CMD" aws --endpoint-url "$S3_2_ENDPOINT_URL" s3 cp "$TMP_BAK" "s3://$S3_2_BUCKET/$BACKUP_NAME" --quiet >/dev/null 2>&1
+                export AWS_DEFAULT_REGION="us-004"
+                run_with_timeout "$TIMEOUT_CMD" aws --endpoint-url "$S3_2_ENDPOINT_URL" s3 cp "$TMP_BAK" "s3://$S3_2_BUCKET/$BACKUP_NAME" --addressing-style path --no-progress >/dev/null 2>&1
             fi
             rm -f "$TMP_BAK"
             log "备份完成: $BACKUP_NAME"

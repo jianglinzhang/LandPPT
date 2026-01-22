@@ -34,9 +34,8 @@ COPY pyproject.toml uv.lock* uv.toml README.md ./
 COPY src/ ./src/
 
 # Install Python dependencies using uv
-# uv sync will create venv at UV_PROJECT_ENVIRONMENT
+# 【关键】在这里安装 webdavclient3 和 requests，确保它们进入虚拟环境
 RUN uv sync --frozen --no-dev --extra-index-url=https://pypi.apryse.com && \
-    # 【关键修改】在这里安装 webdavclient3，解决生产环境没有 pip 的问题
     uv pip install webdavclient3 requests && \
     # Verify key packages are installed
     /opt/venv/bin/python -c "import uvicorn; import playwright; import fastapi; import webdav3" && \
@@ -73,15 +72,12 @@ ENV PYTHONUNBUFFERED=1 \
     VIRTUAL_ENV=/opt/venv
 
 # Install essential runtime dependencies and wkhtmltopdf
-# 【优化】合并了 awscli, coreutils 和其他依赖，去除了重复项
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    # 工具类
     awscli \
     coreutils \
     curl \
     wget \
-    # Wkhtmltopdf / PDF 依赖
     poppler-utils \
     libmagic1 \
     ca-certificates \
@@ -98,7 +94,6 @@ RUN apt-get update && \
     libfontconfig1 \
     libx11-6 \
     libxext6 \
-    # Chromium/Playwright runtime dependencies
     libnss3 \
     libatk1.0-0 \
     libatk-bridge2.0-0 \
@@ -114,7 +109,6 @@ RUN apt-get update && \
     libpango-1.0-0 \
     libcairo2 \
     && \
-    # Download and install wkhtmltopdf
     WKHTMLTOPDF_VERSION="0.12.6.1-3" && \
     WKHTML_ARCH="${TARGETARCH:-$(dpkg --print-architecture)}" && \
     case "$WKHTML_ARCH" in amd64|arm64) ;; *) echo "Unsupported wkhtmltopdf arch: $WKHTML_ARCH" >&2; exit 1 ;; esac && \
@@ -129,13 +123,12 @@ RUN apt-get update && \
 RUN groupadd -r landppt && \
     useradd -r -g landppt -m -d /home/landppt landppt
 
-# Copy Python packages from builder (now includes webdavclient3)
+# Copy Python packages from builder
 COPY --from=builder /opt/venv /opt/venv
 # Copy Playwright browsers from builder
 COPY --from=builder /opt/playwright-browsers /opt/playwright-browsers
 
-# 【关键修改】确保 python3 命令指向虚拟环境
-# 这解决了 sync_data.sh 调用 python3 时找不到 webdav3 模块的问题
+# Create symlink for python3 just in case
 RUN ln -sf /opt/venv/bin/python /opt/venv/bin/python3
 
 # Set permissions
@@ -154,7 +147,9 @@ COPY .env.example ./.env
 COPY sync_data.sh /app/sync_data.sh
 
 # Create directories, set permissions, and inject sync script
-RUN chmod +x docker-healthcheck.sh docker-entrypoint.sh /app/sync_data.sh && \
+# 【关键】sed -i 's/\r$//' /app/sync_data.sh 用于修复 Windows 换行符导致的 EOF 报错
+RUN sed -i 's/\r$//' /app/sync_data.sh && \
+    chmod +x docker-healthcheck.sh docker-entrypoint.sh /app/sync_data.sh && \
     mkdir -p temp/ai_responses_cache temp/style_genes_cache temp/summeryanyfile_cache temp/templates_cache \
              research_reports lib/Linux lib/MacOS lib/Windows uploads data && \
     chown -R landppt:landppt /app /home/landppt && \
@@ -172,4 +167,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=2 \
 
 # Set entrypoint and command
 ENTRYPOINT ["./docker-entrypoint.sh"]
-CMD ["python", "run.py"]```
+CMD ["python", "run.py"]

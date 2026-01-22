@@ -1,7 +1,9 @@
 # LandPPT Docker Image
 # Multi-stage build for minimal image size
 
+# ==========================================
 # Build stage
+# ==========================================
 FROM python:3.11-slim-bookworm AS builder
 
 # Set environment variables for build
@@ -32,16 +34,17 @@ COPY pyproject.toml uv.lock* uv.toml README.md ./
 COPY src/ ./src/
 
 # Install Python dependencies using uv
-# uv sync will create venv at UV_PROJECT_ENVIRONMENT and install all dependencies
+# uv sync will create venv at UV_PROJECT_ENVIRONMENT
 RUN uv sync --frozen --no-dev --extra-index-url=https://pypi.apryse.com && \
+    # 【关键修改】在这里安装 webdavclient3，解决生产环境没有 pip 的问题
+    uv pip install webdavclient3 requests && \
     # Verify key packages are installed
-    /opt/venv/bin/python -c "import uvicorn; import playwright; import fastapi" && \
+    /opt/venv/bin/python -c "import uvicorn; import playwright; import fastapi; import webdav3" && \
     # Clean up build artifacts
     find /opt/venv -name "*.pyc" -delete && \
     find /opt/venv -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
 
 # Install Playwright browsers in builder stage
-# This downloads chromium to /opt/playwright-browsers (system libs are installed in production stage)
 RUN set -eux; \
     mkdir -p /opt/playwright-browsers; \
     /opt/venv/bin/python -c "from importlib.metadata import version; print('Playwright version:', version('playwright'))"; \
@@ -54,9 +57,10 @@ RUN set -eux; \
     echo "Retrying Playwright download with mirror (npmmirror.com)..." >&2; \
     PLAYWRIGHT_DOWNLOAD_HOST=https://npmmirror.com/mirrors/playwright /opt/venv/bin/python -m playwright install chromium
 
+# ==========================================
 # Production stage
+# ==========================================
 FROM python:3.11-slim-bookworm AS production
-
 ARG TARGETARCH
 
 # Set environment variables
@@ -69,18 +73,18 @@ ENV PYTHONUNBUFFERED=1 \
     VIRTUAL_ENV=/opt/venv
 
 # Install essential runtime dependencies and wkhtmltopdf
+# 【优化】合并了 awscli, coreutils 和其他依赖，去除了重复项
 RUN apt-get update && \
     apt-get install -y --no-install-recommends \
-    # 新增的工具
+    # 工具类
     awscli \
     coreutils \
     curl \
     wget \
+    # Wkhtmltopdf / PDF 依赖
     poppler-utils \
     libmagic1 \
     ca-certificates \
-    curl \
-    wget \
     libgomp1 \
     libatomic1 \
     fonts-liberation \
@@ -110,7 +114,7 @@ RUN apt-get update && \
     libpango-1.0-0 \
     libcairo2 \
     && \
-    # Download and install wkhtmltopdf from official releases
+    # Download and install wkhtmltopdf
     WKHTMLTOPDF_VERSION="0.12.6.1-3" && \
     WKHTML_ARCH="${TARGETARCH:-$(dpkg --print-architecture)}" && \
     case "$WKHTML_ARCH" in amd64|arm64) ;; *) echo "Unsupported wkhtmltopdf arch: $WKHTML_ARCH" >&2; exit 1 ;; esac && \
@@ -121,49 +125,43 @@ RUN apt-get update && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /root/.cache
 
-# 新增
-RUN /opt/venv/bin/pip install --no-cache-dir webdavclient3 requests
-
-# Create non-root user (for compatibility, but run as root)
+# Create non-root user
 RUN groupadd -r landppt && \
     useradd -r -g landppt -m -d /home/landppt landppt
 
-# Copy Python packages from builder
+# Copy Python packages from builder (now includes webdavclient3)
 COPY --from=builder /opt/venv /opt/venv
-
 # Copy Playwright browsers from builder
 COPY --from=builder /opt/playwright-browsers /opt/playwright-browsers
 
-# Set permissions for landppt user and playwright browsers
+# 【关键修改】确保 python3 命令指向虚拟环境
+# 这解决了 sync_data.sh 调用 python3 时找不到 webdav3 模块的问题
+RUN ln -sf /opt/venv/bin/python /opt/venv/bin/python3
+
+# Set permissions
 RUN chown -R landppt:landppt /home/landppt && \
     chmod -R 755 /opt/playwright-browsers
 
 # Set work directory
 WORKDIR /app
 
-# Copy application code (minimize layers)
+# Copy application code
 COPY run.py ./
 COPY src/ ./src/
 COPY template_examples/ ./template_examples/
 COPY docker-healthcheck.sh docker-entrypoint.sh ./
 COPY .env.example ./.env
-
-# 新增
 COPY sync_data.sh /app/sync_data.sh
 
-# Create directories and set permissions in one layer
-# 这里将 chmod 和 sed 合并，且去掉了多余的 apt 操作
+# Create directories, set permissions, and inject sync script
 RUN chmod +x docker-healthcheck.sh docker-entrypoint.sh /app/sync_data.sh && \
     mkdir -p temp/ai_responses_cache temp/style_genes_cache temp/summeryanyfile_cache temp/templates_cache \
              research_reports lib/Linux lib/MacOS lib/Windows uploads data && \
     chown -R landppt:landppt /app /home/landppt && \
     chmod -R 755 /app /home/landppt && \
     chmod 666 /app/.env && \
-    # 注入 sync_data.sh 到 entrypoint (关键步骤)
+    # 注入 sync_data.sh 到 entrypoint
     sed -i '/exec "$@"/i /app/sync_data.sh' /app/docker-entrypoint.sh
-
-# Keep landppt user but run as root to handle file permissions
-# USER landppt
 
 # Expose port
 EXPOSE 8000
@@ -174,4 +172,4 @@ HEALTHCHECK --interval=30s --timeout=10s --start-period=30s --retries=2 \
 
 # Set entrypoint and command
 ENTRYPOINT ["./docker-entrypoint.sh"]
-CMD ["python", "run.py"]
+CMD ["python", "run.py"]```

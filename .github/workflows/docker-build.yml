@@ -11,7 +11,7 @@ on:
       - master
     # 仅当以下文件变更时触发
     paths:
-      - 'Dockerfile'
+      - 'Dockerfile-sync'
       - 'docker-compose.yml'
       - 'docker-entrypoint.sh'
       - 'docker-healthcheck.sh'
@@ -116,7 +116,7 @@ jobs:
         uses: docker/build-push-action@v5
         with:
           context: .
-          file: ./Dockerfile
+          file: ./Dockerfile-sync
           platforms: ${{ env.PLATFORMS }}
           # PR 时不推送，仅构建验证
           push: ${{ github.event_name != 'pull_request' && (github.event.inputs.push_image != 'false') }}
@@ -151,7 +151,7 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
       
-      # 使用 Trivy 扫描 Dockerfile 漏洞
+      # 使用 Trivy 扫描 Dockerfile-sync 漏洞
       - name: Run Trivy vulnerability scanner
         uses: aquasecurity/trivy-action@master
         with:

@@ -122,7 +122,7 @@ RUN apt-get update && \
     rm -rf /var/lib/apt/lists/* /tmp/* /var/tmp/* /root/.cache
 
 # 新增
-RUN pip install --no-cache-dir webdavclient3 requests
+RUN /opt/venv/bin/pip install --no-cache-dir webdavclient3 requests
 
 # Create non-root user (for compatibility, but run as root)
 RUN groupadd -r landppt && \

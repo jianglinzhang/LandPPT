@@ -120,6 +120,7 @@ jobs:
           # PR 时不推送，仅构建验证
           push: ${{ github.event_name != 'pull_request' && (github.event.inputs.push_image != 'false') }}
           tags: ${{ steps.meta.outputs.tags }}
+          no-cache: true
           labels: ${{ steps.meta.outputs.labels }}
           # 利用 GitHub Actions 缓存加速构建
           cache-from: type=gha

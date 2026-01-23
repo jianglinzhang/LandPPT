@@ -5,13 +5,13 @@
 # ==============================================================================
 
 # 【配置 AWS】解决下载/上传时的寻址和分片问题
-export AWS_EC2_METADATA_DISABLED=true
-export AWS_CONFIG_FILE=/tmp/aws_config
-cat > "$AWS_CONFIG_FILE" <<'EOF'
-[default]
-s3 =
-    addressing_style = path
-EOF
+# export AWS_EC2_METADATA_DISABLED=true
+# export AWS_CONFIG_FILE=/tmp/aws_config
+# cat > "$AWS_CONFIG_FILE" <<'EOF'
+# [default]
+# s3 =
+#     addressing_style = path
+# EOF
 
 # ----------------- 配置 -----------------
 

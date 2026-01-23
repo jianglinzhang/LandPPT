@@ -1,19 +1,22 @@
 #!/bin/bash
 # ==============================================================================
-# landppt 多源备份脚本 (Final Fix)
-# 修复：上传日志不可见问题、Region 设置问题、环境变量隔离
+# landppt 多源备份脚本 (Final Fix v4)
+# 修复：Synology C2 不支持 aws-chunked 分块上传的问题
 # ==============================================================================
 
 # 1. 强制 Python 路径
 PYTHON_EXEC="/opt/venv/bin/python"
 
-# 2. 初始化 AWS 配置文件 (解决 addressing_style 问题)
+# 2. 初始化 AWS 配置文件 
+# - addressing_style=path: 解决第三方 S3 域名解析问题
+# - multipart_threshold=100MB: 防止 AWS CLI 对小文件自动分片，解决 aws-chunked 报错
 export AWS_EC2_METADATA_DISABLED=true
 export AWS_CONFIG_FILE=/tmp/aws_config
 cat > "$AWS_CONFIG_FILE" <<'EOF'
 [default]
 s3 =
     addressing_style = path
+    multipart_threshold = 100MB
 EOF
 
 # ----------------- 配置 -----------------
@@ -23,9 +26,8 @@ SYNC_INTERVAL="${SYNC_INTERVAL:-600}"
 BACKUP_KEEP="${BACKUP_KEEP:-24}"
 TIMEOUT_CMD="120"
 
-# S3 区域默认值 (如果 .env 没填，这里作为兜底)
-# Synology C2 通常需要指定具体区域
-S3_REGION="${S3_REGION:-auto}"
+# S3 区域默认值
+S3_REGION="${S3_REGION:-us-004}"
 S3_2_REGION="${S3_2_REGION:-auto}"
 
 log() { echo "[Backup] $(date '+%Y-%m-%d %H:%M:%S') $*"; }
@@ -87,10 +89,11 @@ download_s3_file() {
     export AWS_SECRET_ACCESS_KEY="$SECRET"
     export AWS_DEFAULT_REGION="$REGION"
     
+    # 下载依然使用 s3 cp，因为它支持断点续传且通常兼容性较好
     run_with_timeout 60 aws --endpoint-url "$ENDPOINT" s3 cp "s3://$BUCKET/$FILE" "$DL_PATH" --no-progress
 }
 
-# 统一上传与清理函数 (包含详细日志)
+# 统一上传与清理函数 (核心修复)
 upload_and_cleanup_s3() {
     local ENDPOINT="$1" BUCKET="$2" ACCESS="$3" SECRET="$4" REGION="$5" FILE_PATH="$6" REMOTE_NAME="$7"
     
@@ -98,19 +101,22 @@ upload_and_cleanup_s3() {
     export AWS_SECRET_ACCESS_KEY="$SECRET"
     export AWS_DEFAULT_REGION="$REGION"
 
-    # 上传 (移除 >/dev/null 以便查看报错)
-    run_with_timeout "$TIMEOUT_CMD" aws --endpoint-url "$ENDPOINT" s3 cp "$FILE_PATH" "s3://$BUCKET/$REMOTE_NAME" --no-progress
+    # 【修复】改用 s3api put-object
+    # s3 cp 会在文件>8MB时尝试 aws-chunked 上传，导致 Synology C2 报错
+    # s3api put-object 是最原始的单一 PUT 请求，兼容性最强
+    run_with_timeout "$TIMEOUT_CMD" aws --endpoint-url "$ENDPOINT" s3api put-object \
+        --bucket "$BUCKET" --key "$REMOTE_NAME" --body "$FILE_PATH" >/dev/null
+        
     local UPLOAD_RC=$?
 
     if [ $UPLOAD_RC -ne 0 ]; then
         log "错误: S3 上传失败 (Code: $UPLOAD_RC). Endpoint: $ENDPOINT"
     else
-        # 清理旧文件
+        # 清理旧文件 (s3 rm 通常兼容性没问题)
         local FILES=$(aws --endpoint-url "$ENDPOINT" s3 ls "s3://$BUCKET/" 2>/dev/null | awk '{print $4}' | grep 'landppt_backup_' | sort)
         local COUNT=$(echo "$FILES" | wc -l)
         if [ "$COUNT" -gt "$BACKUP_KEEP" ]; then
             local DEL_COUNT=$(($COUNT - $BACKUP_KEEP))
-            # log "清理 S3 旧备份: $DEL_COUNT 个..."
             echo "$FILES" | head -n "$DEL_COUNT" | while read -r F; do
                 [ -n "$F" ] && aws --endpoint-url "$ENDPOINT" s3 rm "s3://$BUCKET/$F" --quiet
             done

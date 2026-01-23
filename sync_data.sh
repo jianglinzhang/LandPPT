@@ -24,8 +24,8 @@ BACKUP_KEEP="${BACKUP_KEEP:-24}"
 TIMEOUT_CMD="120"
 
 # S3 区域默认值 (如果 .env 没填，这里作为兜底)
-# Synology C2 通常需要指定具体区域，如 us-004
-S3_REGION="${S3_REGION:-us-004}"
+# Synology C2 通常需要指定具体区域
+S3_REGION="${S3_REGION:-auto}"
 S3_2_REGION="${S3_2_REGION:-auto}"
 
 log() { echo "[Backup] $(date '+%Y-%m-%d %H:%M:%S') $*"; }

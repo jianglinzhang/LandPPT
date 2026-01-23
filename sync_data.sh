@@ -1,29 +1,24 @@
 #!/bin/bash
 # ==============================================================================
-# LandPPT 多源备份脚本 (基于 OpenWebUI 版本微调)
-# 修复：
-# 1. 下载失败 -> 强制开启 path-style
-# 2. 上传 10MB+ 失败 -> 强制调高 multipart_threshold，禁止自动分片
+# LandPPT 多源备份脚本 (Final S3API Version)
+# 基于 OpenWebUI 代码微调
 # ==============================================================================
 
-# ----------------- 0. 环境与 AWS 关键配置 (核心修复) -----------------
-# 指定 Docker 环境下的 Python
+echo "[Init] Loaded Script: v2026-Fix-S3API (如果没看到这行，说明没更新镜像)"
+
+# ----------------- 0. 环境与 AWS 配置 -----------------
 PYTHON_EXEC="/opt/venv/bin/python"
 
-# 生成 AWS 配置文件
-# addressing_style = path: 解决 Synology/MinIO 下载时的域名解析问题
-# multipart_threshold = 100MB: 解决 Synology 不支持 aws-chunked 上传的问题
+# 生成 AWS 配置文件 (解决下载时的域名解析问题)
 export AWS_EC2_METADATA_DISABLED=true
 export AWS_CONFIG_FILE=/tmp/aws_config
 cat > "$AWS_CONFIG_FILE" <<'EOF'
 [default]
 s3 =
     addressing_style = path
-    multipart_threshold = 100MB
 EOF
 
 # ----------------- 配置 -----------------
-# LandPPT 默认数据目录 (当前目录)
 DATA_DIR="."
 DB_FILE="${DATA_DIR}/landppt.db"
 
@@ -31,14 +26,13 @@ DB_FILE="${DATA_DIR}/landppt.db"
 SYNC_INTERVAL="${SYNC_INTERVAL:-600}"
 BACKUP_KEEP="${BACKUP_KEEP:-24}"
 
-# S3 区域默认值 (Synology C2 必须正确设置，否则 403)
-# 如果你的 C2 是 us-004，请确保 .env 里 S3_REGION=us-004，或者这里默认改好
+# S3 区域默认值 (Synology C2 务必设置)
 S3_REGION="${S3_REGION:-us-004}"
 S3_2_REGION="${S3_2_REGION:-auto}"
 
-# 超时设置 (秒)
-TIMEOUT_RESTORE="60"  
-TIMEOUT_CMD="120"     
+# 超时设置
+TIMEOUT_RESTORE="60"
+TIMEOUT_CMD="120"
 
 log() { echo "[Backup] $(date '+%Y-%m-%d %H:%M:%S') $*"; }
 
@@ -63,9 +57,7 @@ run_with_timeout() {
 extract_db() {
     local tar_path="$1"
     [ ! -f "$tar_path" ] && return 1
-    
     mkdir -p "$DATA_DIR"
-    
     $PYTHON_EXEC -c "
 import sys, tarfile, os, shutil
 try:
@@ -83,7 +75,7 @@ except:
 " >/dev/null 2>&1
 }
 
-# ----------------- 1. 获取最新文件名逻辑 -----------------
+# ----------------- 1. 获取最新文件名 -----------------
 
 get_s3_latest_name() {
     local ENDPOINT="$1" BUCKET="$2" ACCESS="$3" SECRET="$4" REGION="$5"
@@ -91,7 +83,6 @@ get_s3_latest_name() {
     export AWS_SECRET_ACCESS_KEY="$SECRET"
     export AWS_DEFAULT_REGION="$REGION"
     
-    # --no-verify-ssl 可选，防止某些自签证书报错
     run_with_timeout 20 aws --endpoint-url "$ENDPOINT" s3 ls "s3://$BUCKET/" 2>/dev/null \
         | awk '{print $4}' | grep 'landppt_backup_' | sort | tail -n 1
 }
@@ -126,7 +117,7 @@ download_s3_file() {
     export AWS_SECRET_ACCESS_KEY="$SECRET"
     export AWS_DEFAULT_REGION="$REGION"
     
-    # 移除 --quiet 以便调试，path-style 已由 config 文件接管
+    # 下载依然用 s3 cp，因为它支持 path-style 配置
     run_with_timeout "$TIMEOUT_RESTORE" aws --endpoint-url "$ENDPOINT" s3 cp "s3://$BUCKET/$FILE" "$DL_PATH" --no-progress
 }
 
@@ -186,25 +177,15 @@ else
     if [ -n "$BEST_LINE" ]; then
         TARGET_FILE=$(echo "$BEST_LINE" | awk '{print $1}')
         SOURCE_TYPE=$(echo "$BEST_LINE" | awk '{print $2}')
-        
         DL_FILE="/tmp/restore.tar.gz"
         rm -f "$DL_FILE"
-
         log ">>> 决定使用最新备份: $TARGET_FILE (来源: $SOURCE_TYPE)"
-        
         SUCCESS=0
         case "$SOURCE_TYPE" in
-            "S3_MAIN")
-                download_s3_file "$S3_ENDPOINT_URL" "$S3_BUCKET" "$S3_ACCESS_KEY_ID" "$S3_SECRET_ACCESS_KEY" "$S3_REGION" "$TARGET_FILE" "$DL_FILE"
-                ;;
-            "S3_SEC")
-                download_s3_file "$S3_2_ENDPOINT_URL" "$S3_2_BUCKET" "$S3_2_ACCESS_KEY_ID" "$S3_2_SECRET_ACCESS_KEY" "$S3_2_REGION" "$TARGET_FILE" "$DL_FILE"
-                ;;
-            "WEBDAV")
-                download_webdav_file "$TARGET_FILE" "$DL_FILE"
-                ;;
+            "S3_MAIN") download_s3_file "$S3_ENDPOINT_URL" "$S3_BUCKET" "$S3_ACCESS_KEY_ID" "$S3_SECRET_ACCESS_KEY" "$S3_REGION" "$TARGET_FILE" "$DL_FILE" ;;
+            "S3_SEC")  download_s3_file "$S3_2_ENDPOINT_URL" "$S3_2_BUCKET" "$S3_2_ACCESS_KEY_ID" "$S3_2_SECRET_ACCESS_KEY" "$S3_2_REGION" "$TARGET_FILE" "$DL_FILE" ;;
+            "WEBDAV")  download_webdav_file "$TARGET_FILE" "$DL_FILE" ;;
         esac
-        
         if [ -f "$DL_FILE" ] && [ -s "$DL_FILE" ]; then
             extract_db "$DL_FILE"
             if [ $? -eq 0 ]; then
@@ -213,10 +194,7 @@ else
                 rm -f "$DL_FILE"
             fi
         fi
-        
-        if [ $SUCCESS -eq 0 ]; then
-            log "错误: 尽管发现了文件，但下载或解压失败。"
-        fi
+        if [ $SUCCESS -eq 0 ]; then log "错误: 尽管发现了文件，但下载或解压失败。"; fi
     else
         log "未在任何源中找到备份文件，将启动全新实例。"
     fi
@@ -244,15 +222,15 @@ fi
                     "${WEBDAV_URL%/}/${WEBDAV_BACKUP_PATH#/}/$BACKUP_NAME" >/dev/null 2>&1
             fi
             
-            # 上传 S3 (主)
+            # 上传 S3 (主) - 使用 s3api put-object 杜绝分片上传
             if has_s3; then
                 export AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY_ID"
                 export AWS_SECRET_ACCESS_KEY="$S3_SECRET_ACCESS_KEY"
                 export AWS_DEFAULT_REGION="$S3_REGION"
                 
-                # 这里的 s3 cp 会自动读取开头生成的 config，从而不进行分片，也不会报错
-                # 移除了 >/dev/null 以便在失败时看到日志
-                run_with_timeout "$TIMEOUT_CMD" aws --endpoint-url "$S3_ENDPOINT_URL" s3 cp "$TMP_BAK" "s3://$S3_BUCKET/$BACKUP_NAME" --no-progress
+                # 【核心修复】改为 s3api put-object
+                run_with_timeout "$TIMEOUT_CMD" aws --endpoint-url "$S3_ENDPOINT_URL" s3api put-object \
+                    --bucket "$S3_BUCKET" --key "$BACKUP_NAME" --body "$TMP_BAK" >/dev/null
                 
                 # S3 清理
                 FILES=$(aws --endpoint-url "$S3_ENDPOINT_URL" s3 ls "s3://$S3_BUCKET/" 2>/dev/null | awk '{print $4}' | grep 'landppt_backup_' | sort)
@@ -270,7 +248,9 @@ fi
                 export AWS_ACCESS_KEY_ID="$S3_2_ACCESS_KEY_ID"
                 export AWS_SECRET_ACCESS_KEY="$S3_2_SECRET_ACCESS_KEY"
                 export AWS_DEFAULT_REGION="$S3_2_REGION"
-                run_with_timeout "$TIMEOUT_CMD" aws --endpoint-url "$S3_2_ENDPOINT_URL" s3 cp "$TMP_BAK" "s3://$S3_2_BUCKET/$BACKUP_NAME" --no-progress
+                # 【核心修复】改为 s3api put-object
+                run_with_timeout "$TIMEOUT_CMD" aws --endpoint-url "$S3_2_ENDPOINT_URL" s3api put-object \
+                    --bucket "$S3_2_BUCKET" --key "$BACKUP_NAME" --body "$TMP_BAK" >/dev/null
             fi
             
             rm -f "$TMP_BAK"

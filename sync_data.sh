@@ -1,23 +1,14 @@
 #!/bin/bash
 # ==============================================================================
-# landppt 多源备份脚本 (Final Fix v4)
-# 修复：Synology C2 不支持 aws-chunked 分块上传的问题
+# landppt 多源备份脚本 (Python Native Upload 版)
+# 修复：彻底解决 aws-chunked 报错，使用 Python botocore 直接上传
 # ==============================================================================
 
 # 1. 强制 Python 路径
 PYTHON_EXEC="/opt/venv/bin/python"
 
-# 2. 初始化 AWS 配置文件 
-# - addressing_style=path: 解决第三方 S3 域名解析问题
-# - multipart_threshold=100MB: 防止 AWS CLI 对小文件自动分片，解决 aws-chunked 报错
-export AWS_EC2_METADATA_DISABLED=true
-export AWS_CONFIG_FILE=/tmp/aws_config
-cat > "$AWS_CONFIG_FILE" <<'EOF'
-[default]
-s3 =
-    addressing_style = path
-    multipart_threshold = 100MB
-EOF
+# 2. 检查环境
+$PYTHON_EXEC -c "import botocore; print('Check: botocore module found')" >/dev/null 2>&1 || { echo "[Error] botocore not found"; exit 1; }
 
 # ----------------- 配置 -----------------
 DATA_DIR="."
@@ -32,7 +23,57 @@ S3_2_REGION="${S3_2_REGION:-auto}"
 
 log() { echo "[Backup] $(date '+%Y-%m-%d %H:%M:%S') $*"; }
 
-# ----------------- 检查函数 -----------------
+# ----------------- Python 原生上传函数 (核心修复) -----------------
+# 使用 Python botocore 库上传，绕过 AWS CLI 的 aws-chunked 限制
+python_s3_upload() {
+    local ENDPOINT="$1" BUCKET="$2" ACCESS="$3" SECRET="$4" REGION="$5" FILE_PATH="$6" KEY="$7"
+    
+    $PYTHON_EXEC -c "
+import sys, os
+import botocore.session
+from botocore.config import Config
+
+try:
+    endpoint = '$ENDPOINT'
+    bucket = '$BUCKET'
+    access = '$ACCESS'
+    secret = '$SECRET'
+    region = '$REGION'
+    filepath = '$FILE_PATH'
+    key = '$KEY'
+
+    # 强制使用 path-style，这是 Synology C2 必须的
+    # read_timeout 设置长一点防止断开
+    config = Config(
+        s3={'addressing_style': 'path'},
+        connect_timeout=60,
+        read_timeout=120,
+        retries={'max_attempts': 3}
+    )
+
+    session = botocore.session.get_session()
+    client = session.create_client(
+        's3',
+        endpoint_url=endpoint,
+        aws_access_key_id=access,
+        aws_secret_access_key=secret,
+        region_name=region,
+        config=config
+    )
+
+    # 简单的 put_object，不使用分片，文件流直接传输
+    with open(filepath, 'rb') as f:
+        client.put_object(Bucket=bucket, Key=key, Body=f)
+    
+    print('Upload Success')
+
+except Exception as e:
+    print(f'Error: {str(e)}')
+    sys.exit(1)
+"
+}
+
+# ----------------- 辅助函数 -----------------
 has_webdav() { [[ -n "$WEBDAV_URL" && -n "$WEBDAV_USERNAME" && -n "$WEBDAV_PASSWORD" ]]; }
 has_s3()     { [[ -n "$S3_ENDPOINT_URL" && -n "$S3_BUCKET" && -n "$S3_ACCESS_KEY_ID" ]]; }
 has_s3_2()   { [[ -n "$S3_2_ENDPOINT_URL" && -n "$S3_2_BUCKET" && -n "$S3_2_ACCESS_KEY_ID" ]]; }
@@ -48,8 +89,6 @@ run_with_timeout() {
         "$@"
     fi
 }
-
-# ----------------- 核心功能函数 -----------------
 
 extract_db() {
     local tar_path="$1"
@@ -72,6 +111,16 @@ except:
 " >/dev/null 2>&1
 }
 
+# ----------------- 列表与下载 (使用 AWS CLI, 因为下载通常没问题) -----------------
+# 依然需要保留 AWS 配置给下载用
+export AWS_EC2_METADATA_DISABLED=true
+export AWS_CONFIG_FILE=/tmp/aws_config
+cat > "$AWS_CONFIG_FILE" <<'EOF'
+[default]
+s3 =
+    addressing_style = path
+EOF
+
 get_s3_latest_name() {
     local ENDPOINT="$1" BUCKET="$2" ACCESS="$3" SECRET="$4" REGION="$5"
     export AWS_ACCESS_KEY_ID="$ACCESS"
@@ -88,31 +137,27 @@ download_s3_file() {
     export AWS_ACCESS_KEY_ID="$ACCESS"
     export AWS_SECRET_ACCESS_KEY="$SECRET"
     export AWS_DEFAULT_REGION="$REGION"
-    
-    # 下载依然使用 s3 cp，因为它支持断点续传且通常兼容性较好
     run_with_timeout 60 aws --endpoint-url "$ENDPOINT" s3 cp "s3://$BUCKET/$FILE" "$DL_PATH" --no-progress
 }
 
-# 统一上传与清理函数 (核心修复)
+# ----------------- 整合流程 -----------------
 upload_and_cleanup_s3() {
     local ENDPOINT="$1" BUCKET="$2" ACCESS="$3" SECRET="$4" REGION="$5" FILE_PATH="$6" REMOTE_NAME="$7"
     
-    export AWS_ACCESS_KEY_ID="$ACCESS"
-    export AWS_SECRET_ACCESS_KEY="$SECRET"
-    export AWS_DEFAULT_REGION="$REGION"
-
-    # 【修复】改用 s3api put-object
-    # s3 cp 会在文件>8MB时尝试 aws-chunked 上传，导致 Synology C2 报错
-    # s3api put-object 是最原始的单一 PUT 请求，兼容性最强
-    run_with_timeout "$TIMEOUT_CMD" aws --endpoint-url "$ENDPOINT" s3api put-object \
-        --bucket "$BUCKET" --key "$REMOTE_NAME" --body "$FILE_PATH" >/dev/null
-        
-    local UPLOAD_RC=$?
-
-    if [ $UPLOAD_RC -ne 0 ]; then
-        log "错误: S3 上传失败 (Code: $UPLOAD_RC). Endpoint: $ENDPOINT"
+    # 1. 使用 Python 上传 (不再调用 aws cli)
+    local OUTPUT
+    OUTPUT=$(python_s3_upload "$ENDPOINT" "$BUCKET" "$ACCESS" "$SECRET" "$REGION" "$FILE_PATH" "$REMOTE_NAME" 2>&1)
+    local RC=$?
+    
+    if [ $RC -ne 0 ] || [[ "$OUTPUT" != *"Upload Success"* ]]; then
+        log "错误: S3 上传失败. Endpoint: $ENDPOINT"
+        log "详情: $OUTPUT"
     else
-        # 清理旧文件 (s3 rm 通常兼容性没问题)
+        # 2. 清理旧文件 (清理操作简单，继续用 AWS CLI 即可)
+        export AWS_ACCESS_KEY_ID="$ACCESS"
+        export AWS_SECRET_ACCESS_KEY="$SECRET"
+        export AWS_DEFAULT_REGION="$REGION"
+        
         local FILES=$(aws --endpoint-url "$ENDPOINT" s3 ls "s3://$BUCKET/" 2>/dev/null | awk '{print $4}' | grep 'landppt_backup_' | sort)
         local COUNT=$(echo "$FILES" | wc -l)
         if [ "$COUNT" -gt "$BACKUP_KEEP" ]; then
@@ -163,7 +208,6 @@ except: sys.exit(1)
 "
 }
 
-# ----------------- 启动恢复流程 -----------------
 if [ -f "$DB_FILE" ] && [ -s "$DB_FILE" ]; then
     log "本地数据库已存在，跳过恢复。"
 else
@@ -209,7 +253,6 @@ else
     rm -f "$CANDIDATES_FILE"
 fi
 
-# ----------------- 后台备份循环 -----------------
 (
     while true; do
         sleep "$SYNC_INTERVAL"
@@ -217,23 +260,18 @@ fi
             TS=$(date +%Y%m%d_%H%M%S)
             BACKUP_NAME="landppt_backup_${TS}.tar.gz"
             TMP_BAK="/tmp/$BACKUP_NAME"
-            
-            # 1. 打包
             tar -czf "$TMP_BAK" -C "$DATA_DIR" landppt.db 2>/dev/null
             
-            # 2. 上传 WebDAV
             if has_webdav; then
                 run_with_timeout "$TIMEOUT_CMD" curl -s -f --connect-timeout 15 \
                     -u "$WEBDAV_USERNAME:$WEBDAV_PASSWORD" -T "$TMP_BAK" \
                     "${WEBDAV_URL%/}/${WEBDAV_BACKUP_PATH#/}/$BACKUP_NAME" >/dev/null 2>&1
             fi
             
-            # 3. 上传 S3 (主)
             if has_s3; then
                 upload_and_cleanup_s3 "$S3_ENDPOINT_URL" "$S3_BUCKET" "$S3_ACCESS_KEY_ID" "$S3_SECRET_ACCESS_KEY" "$S3_REGION" "$TMP_BAK" "$BACKUP_NAME"
             fi
 
-            # 4. 上传 S3 (备)
             if has_s3_2; then
                 upload_and_cleanup_s3 "$S3_2_ENDPOINT_URL" "$S3_2_BUCKET" "$S3_2_ACCESS_KEY_ID" "$S3_2_SECRET_ACCESS_KEY" "$S3_2_REGION" "$TMP_BAK" "$BACKUP_NAME"
             fi

@@ -116,7 +116,7 @@ download_s3_file() {
     log "从 S3 下载: $FILE ..."
     export AWS_ACCESS_KEY_ID="$ACCESS"
     export AWS_SECRET_ACCESS_KEY="$SECRET"
-    export AWS_DEFAULT_REGION="auto"
+    export AWS_DEFAULT_REGION="us-004"
     run_with_timeout "$TIMEOUT_RESTORE" aws --endpoint-url "$ENDPOINT" s3 cp "s3://$BUCKET/$FILE" "$DL_PATH" --quiet
 }
 
@@ -244,7 +244,7 @@ fi
                 export AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY_ID"
                 export AWS_SECRET_ACCESS_KEY="$S3_SECRET_ACCESS_KEY"
                 export AWS_DEFAULT_REGION="auto"
-                run_with_timeout "$TIMEOUT_CMD" aws --endpoint-url "$S3_ENDPOINT_URL" s3 cp "$TMP_BAK" "s3://$S3_BUCKET/$BACKUP_NAME" --quiet >/dev/null 2>&1
+                run_with_timeout "$TIMEOUT_CMD" aws --endpoint-url "$S3_ENDPOINT_URL" s3 cp "$TMP_BAK" "s3://$S3_BUCKET/$BACKUP_NAME" >/dev/null 2>&1
                 
                 # S3 清理
                 FILES=$(aws --endpoint-url "$S3_ENDPOINT_URL" s3 ls "s3://$S3_BUCKET/" | awk '{print $4}' | grep 'landppt_backup_' | sort)
@@ -262,7 +262,17 @@ fi
                 export AWS_ACCESS_KEY_ID="$S3_2_ACCESS_KEY_ID"
                 export AWS_SECRET_ACCESS_KEY="$S3_2_SECRET_ACCESS_KEY"
                 export AWS_DEFAULT_REGION="auto"
-                run_with_timeout "$TIMEOUT_CMD" aws --endpoint-url "$S3_2_ENDPOINT_URL" s3 cp "$TMP_BAK" "s3://$S3_2_BUCKET/$BACKUP_NAME" --quiet >/dev/null 2>&1
+                run_with_timeout "$TIMEOUT_CMD" aws --endpoint-url "$S3_2_ENDPOINT_URL" s3 cp "$TMP_BAK" "s3://$S3_2_BUCKET/$BACKUP_NAME" >/dev/null 2>&1
+
+                # S3 清理
+                FILES=$(aws --endpoint-url "$S3_2_ENDPOINT_URL" s3 ls "s3://$S3_2_BUCKET/" | awk '{print $4}' | grep 'landppt_backup_' | sort)
+                COUNT=$(echo "$FILES" | wc -l)
+                if [ "$COUNT" -gt "$BACKUP_KEEP" ]; then
+                    DEL=$(($COUNT - $BACKUP_KEEP))
+                    echo "$FILES" | head -n "$DEL" | while read -r F; do
+                        aws --endpoint-url "$S3_2_ENDPOINT_URL" s3 rm "s3://$S3_2_BUCKET/$F" --quiet
+                    done
+                fi
             fi
             
             rm -f "$TMP_BAK"

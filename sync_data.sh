@@ -20,6 +20,15 @@ BACKUP_KEEP="${BACKUP_KEEP:-24}"
 TIMEOUT_RESTORE="60"
 TIMEOUT_CMD="120"
 
+# 强制 S3 使用 path-style（适用于 Synology C2/MinIO 等 S3 兼容服务）
+export AWS_EC2_METADATA_DISABLED=true
+export AWS_CONFIG_FILE=/tmp/aws_config
+cat > "$AWS_CONFIG_FILE" <<'EOF'
+[default]
+s3 =
+    addressing_style = path
+EOF
+
 log() { echo "[Backup] $(date '+%Y-%m-%d %H:%M:%S') $*"; }
 
 # ----------------- 检查函数 -----------------
@@ -99,9 +108,9 @@ download_s3_file() {
     export AWS_SECRET_ACCESS_KEY="$SECRET"
     export AWS_DEFAULT_REGION="us-004"
     
-    # 【修复重点】添加 --addressing-style path 并移除 --quiet
+    # 【修复重点】移除 --quiet
     run_with_timeout "$TIMEOUT_RESTORE" aws --endpoint-url "$ENDPOINT" s3 cp "s3://$BUCKET/$FILE" "$DL_PATH" \
-        --addressing-style path --no-progress
+        --no-progress
 }
 
 download_webdav_file() {
@@ -153,7 +162,9 @@ else
         
         case "$SOURCE_TYPE" in
             "S3_MAIN") download_s3_file "$S3_ENDPOINT_URL" "$S3_BUCKET" "$S3_ACCESS_KEY_ID" "$S3_SECRET_ACCESS_KEY" "$TARGET_FILE" "$DL_FILE" ;;
-            "S3_SEC")  download_s3_file "$S3_2_ENDPOINT_URL" "$S3_2_BUCKET" "$S3_2_ACCESS_KEY_ID" "$S3_2_SECRET_ACCESS_KEY" "$TARGET_FILE" "$DL_FILE" ;;
+            "S3_SEC")  
+            log ">>> 当前的区域AWS_DEFAULT_REGION: $AWS_DEFAULT_REGION"
+            download_s3_file "$S3_2_ENDPOINT_URL" "$S3_2_BUCKET" "$S3_2_ACCESS_KEY_ID" "$S3_2_SECRET_ACCESS_KEY" "$TARGET_FILE" "$DL_FILE" ;;
             "WEBDAV")  download_webdav_file "$TARGET_FILE" "$DL_FILE" ;;
         esac
         
@@ -189,8 +200,8 @@ fi
                 export AWS_SECRET_ACCESS_KEY="$S3_SECRET_ACCESS_KEY"
                 export AWS_DEFAULT_REGION="us-004"
                 
-                # 【同步修改】上传也要加 --addressing-style path
-                run_with_timeout "$TIMEOUT_CMD" aws --endpoint-url "$S3_ENDPOINT_URL" s3 cp "$TMP_BAK" "s3://$S3_BUCKET/$BACKUP_NAME" --addressing-style path --no-progress >/dev/null 2>&1
+                # 【同步修改】上传
+                run_with_timeout "$TIMEOUT_CMD" aws --endpoint-url "$S3_ENDPOINT_URL" s3 cp "$TMP_BAK" "s3://$S3_BUCKET/$BACKUP_NAME" --no-progress >/dev/null 2>&1
                 
                 # 清理旧备份
                 FILES=$(aws --endpoint-url "$S3_ENDPOINT_URL" s3 ls "s3://$S3_BUCKET/" | awk '{print $4}' | grep 'landppt_backup_' | sort)
@@ -205,8 +216,8 @@ fi
             if has_s3_2; then
                 export AWS_ACCESS_KEY_ID="$S3_2_ACCESS_KEY_ID"
                 export AWS_SECRET_ACCESS_KEY="$S3_2_SECRET_ACCESS_KEY"
-                export AWS_DEFAULT_REGION="us-004"
-                run_with_timeout "$TIMEOUT_CMD" aws --endpoint-url "$S3_2_ENDPOINT_URL" s3 cp "$TMP_BAK" "s3://$S3_2_BUCKET/$BACKUP_NAME" --addressing-style path --no-progress >/dev/null 2>&1
+                export AWS_DEFAULT_REGION="auto"
+                run_with_timeout "$TIMEOUT_CMD" aws --endpoint-url "$S3_2_ENDPOINT_URL" s3 cp "$TMP_BAK" "s3://$S3_2_BUCKET/$BACKUP_NAME" --no-progress >/dev/null 2>&1
             fi
             rm -f "$TMP_BAK"
             log "备份完成: $BACKUP_NAME"

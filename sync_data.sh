@@ -73,7 +73,7 @@ get_s3_latest_name() {
     local ENDPOINT="$1" BUCKET="$2" ACCESS="$3" SECRET="$4"
     export AWS_ACCESS_KEY_ID="$ACCESS"
     export AWS_SECRET_ACCESS_KEY="$SECRET"
-    export AWS_DEFAULT_REGION="us-east-1"  # 强制指定
+    export AWS_DEFAULT_REGION="auto"  # 强制指定
     
     # 列表操作通常不需要 path style，但加上也无妨
     run_with_timeout 20 aws --endpoint-url "$ENDPOINT" s3 ls "s3://$BUCKET/" --no-verify-ssl 2>/dev/null \
@@ -198,7 +198,7 @@ fi
             if has_s3; then
                 export AWS_ACCESS_KEY_ID="$S3_ACCESS_KEY_ID"
                 export AWS_SECRET_ACCESS_KEY="$S3_SECRET_ACCESS_KEY"
-                export AWS_DEFAULT_REGION="us-east-1"
+                export AWS_DEFAULT_REGION="auto"
                 
                 # 【同步修改】上传
                 run_with_timeout "$TIMEOUT_CMD" aws --endpoint-url "$S3_ENDPOINT_URL" s3 cp "$TMP_BAK" "s3://$S3_BUCKET/$BACKUP_NAME" --no-progress >/dev/null 2>&1

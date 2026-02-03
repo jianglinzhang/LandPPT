@@ -473,35 +473,14 @@ class GoogleProvider(AIProvider):
         self.api_key = config.get("api_key")
         # Keep the configured base_url; used for REST calls (including mirror endpoints).
         self.base_url = config.get("base_url", "https://generativelanguage.googleapis.com")
-        try:
-            import google.generativeai as genai
-
-            # Configure the API key
-            genai.configure(api_key=self.api_key)
-
-            self.client = genai
-            self.model_instance = genai.GenerativeModel(config.get("model", "gemini-1.5-flash"))
-        except ImportError:
-            logger.warning("Google Generative AI library not installed. Install with: pip install google-generativeai")
-            self.client = None
-            self.model_instance = None
+        # The legacy `google.generativeai` package is deprecated and emits warnings on import.
+        # Use the REST API implementation in this provider instead.
+        self.client = None
+        self.model_instance = None
 
     def _convert_messages_to_gemini(self, messages: List[AIMessage]):
-        """Convert AIMessage list to Gemini format, supporting multimodal content"""
+        """Convert AIMessage list to Gemini REST prompt parts (supports multimodal content)."""
         import base64
-
-        # Try to import genai types for proper image handling
-        try:
-            from google.genai import types
-            GENAI_TYPES_AVAILABLE = True
-        except ImportError:
-            try:
-                # Fallback to older API structure
-                from google.generativeai import types
-                GENAI_TYPES_AVAILABLE = True
-            except ImportError:
-                logger.warning("Google GenAI types not available for proper image processing")
-                GENAI_TYPES_AVAILABLE = False
 
         # Check if we have any images
         has_images = any(
@@ -549,36 +528,20 @@ class GoogleProvider(AIProvider):
 
                             # Process image for Gemini
                             image_url = part.image_url.get("url", "")
-                            if image_url.startswith("data:image/") and GENAI_TYPES_AVAILABLE:
+                            if image_url.startswith("data:image/"):
                                 try:
                                     # Extract base64 data and mime type
                                     header, base64_data = image_url.split(",", 1)
                                     mime_type = header.split(":")[1].split(";")[0]  # Extract mime type like 'image/jpeg'
                                     image_data = base64.b64decode(base64_data)
 
-                                    # Create Gemini-compatible part from base64 image data
-                                    image_part = None
-                                    if GENAI_TYPES_AVAILABLE:
-                                        if hasattr(types, 'Part') and hasattr(types.Part, 'from_bytes'):
-                                            image_part = types.Part.from_bytes(
-                                                data=image_data,
-                                                mime_type=mime_type
-                                            )
-                                        elif hasattr(types, 'to_part'):
-                                            image_part = types.to_part({
-                                                'inline_data': {
-                                                    'mime_type': mime_type,
-                                                    'data': image_data
-                                                }
-                                            })
-                                    if image_part is None:
-                                        image_part = {
-                                            'inline_data': {
-                                                'mime_type': mime_type,
-                                                'data': image_data
-                                            }
+                                    # REST-compatible inline_data payload (bytes -> base64 happens later).
+                                    content_parts.append({
+                                        "inline_data": {
+                                            "mime_type": mime_type,
+                                            "data": image_data,
                                         }
-                                    content_parts.append(image_part)
+                                    })
                                     logger.info(f"Successfully processed image for Gemini: {mime_type}, {len(image_data)} bytes")
                                 except Exception as e:
                                     logger.error(f"Failed to process image for Gemini: {e}")
@@ -705,9 +668,8 @@ class GoogleProvider(AIProvider):
     async def chat_completion(self, messages: List[AIMessage], **kwargs) -> AIResponse:
         """Generate chat completion using Google Gemini"""
         normalized_base_url = self._normalize_base_url(self.base_url)
-        use_rest = normalized_base_url != "https://generativelanguage.googleapis.com"
-        if not use_rest and (not self.client or not self.model_instance):
-            raise RuntimeError("Google Gemini client not available")
+        # Always use the REST path to avoid importing deprecated `google.generativeai`.
+        use_rest = True
 
         config = self._merge_config(**kwargs)
 
@@ -1037,6 +999,9 @@ class AIProviderFactory:
 
     _providers = {
         "openai": OpenAIProvider,
+        "deepseek": OpenAIProvider,  # OpenAI-compatible
+        "kimi": OpenAIProvider,  # OpenAI-compatible
+        "minimax": OpenAIProvider,  # OpenAI-compatible
         "anthropic": AnthropicProvider,
         "google": GoogleProvider,
         "gemini": GoogleProvider,  # Alias for google

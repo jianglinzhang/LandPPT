@@ -1413,6 +1413,40 @@
             box-shadow: 0 12px 24px rgba(0, 0, 0, 0.08);
         }
 
+        .ai-message-content {
+            line-height: 1.5;
+        }
+
+        .ai-message-footer {
+            display: none;
+            justify-content: flex-end;
+            margin-top: var(--spacing-xs);
+        }
+
+        .ai-message.assistant[data-complete="true"] .ai-message-footer {
+            display: flex;
+        }
+
+        .ai-reanswer-btn {
+            width: 30px;
+            height: 30px;
+            border-radius: 999px;
+            border: 1px solid var(--border-color);
+            background: transparent;
+            color: var(--text-secondary);
+            cursor: pointer;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            transition: all 0.2s ease;
+        }
+
+        .ai-reanswer-btn:hover {
+            background: rgba(0, 0, 0, 0.04);
+            color: var(--text-primary);
+            transform: rotate(30deg);
+        }
+
         .ai-message.system {
             background: var(--surface-elevated);
             color: var(--text-secondary);
@@ -7676,7 +7710,7 @@
 
                         // 显示AI分析信息
                         if (result.ai_analysis) {
-                            addAIMessage('assistant', `配图分析：${result.ai_analysis.reasoning || '已完成图片生成和插入'}`);
+                            addAIMessage(`配图分析：${result.ai_analysis.reasoning || '已完成图片生成和插入'}`, 'assistant');
                         }
 
                     } else {
@@ -9219,6 +9253,91 @@
         }
 
         // AI消息处理函数
+        function getAIMessageContentElement(messageDiv) {
+            if (!messageDiv) return null;
+            return messageDiv.querySelector('.ai-message-content') || messageDiv;
+        }
+
+        function setAIMessageComplete(messageDiv, isComplete) {
+            if (!messageDiv) return;
+            messageDiv.setAttribute('data-complete', isComplete ? 'true' : 'false');
+        }
+
+        function ensureAssistantMessageStructure(messageDiv) {
+            if (!messageDiv) return;
+            messageDiv.classList.add('assistant');
+
+            if (!messageDiv.hasAttribute('data-complete')) {
+                setAIMessageComplete(messageDiv, true);
+            }
+
+            let contentEl = messageDiv.querySelector('.ai-message-content');
+            if (!contentEl) {
+                const existingHtml = messageDiv.innerHTML;
+                messageDiv.innerHTML = '';
+
+                contentEl = document.createElement('div');
+                contentEl.className = 'ai-message-content';
+                contentEl.innerHTML = existingHtml;
+                messageDiv.appendChild(contentEl);
+            }
+
+            if (!messageDiv.querySelector('.ai-message-footer')) {
+                const footerEl = document.createElement('div');
+                footerEl.className = 'ai-message-footer';
+
+                const regenBtn = document.createElement('button');
+                regenBtn.type = 'button';
+                regenBtn.className = 'ai-reanswer-btn';
+                regenBtn.title = '重新回答';
+                regenBtn.innerHTML = '<i class="fas fa-sync-alt"></i>';
+                regenBtn.addEventListener('click', () => regenerateAIAnswer(messageDiv));
+
+                footerEl.appendChild(regenBtn);
+                messageDiv.appendChild(footerEl);
+            }
+        }
+
+        function setAssistantMessageContentHtml(messageDiv, html) {
+            if (!messageDiv) return;
+            ensureAssistantMessageStructure(messageDiv);
+            const contentEl = getAIMessageContentElement(messageDiv);
+            if (contentEl) contentEl.innerHTML = html;
+        }
+
+        function removeAllWaitingAnimations() {
+            const messagesContainer = document.getElementById('aiChatMessages');
+            if (!messagesContainer) return;
+            messagesContainer.querySelectorAll('.ai-message.ai-waiting').forEach(el => el.remove());
+        }
+
+        function recordAIChatHistory(type, content, messageDiv) {
+            if (currentSlideIndex < 0) return;
+            if (!aiChatHistory[currentSlideIndex]) {
+                aiChatHistory[currentSlideIndex] = [];
+            }
+            const role = type === 'user' ? 'user' : 'assistant';
+            aiChatHistory[currentSlideIndex].push({
+                role: role,
+                content: content,
+                timestamp: Date.now()
+            });
+            const idx = aiChatHistory[currentSlideIndex].length - 1;
+            if (messageDiv) {
+                messageDiv.setAttribute('data-history-index', String(idx));
+            }
+        }
+
+        function updateAIChatHistory(messageDiv, content) {
+            if (!messageDiv || currentSlideIndex < 0) return;
+            const idxStr = messageDiv.getAttribute('data-history-index');
+            const idx = idxStr ? parseInt(idxStr, 10) : NaN;
+            if (!Number.isFinite(idx)) return;
+            if (!aiChatHistory[currentSlideIndex] || !aiChatHistory[currentSlideIndex][idx]) return;
+            aiChatHistory[currentSlideIndex][idx].content = content;
+            aiChatHistory[currentSlideIndex][idx].timestamp = Date.now();
+        }
+
         function addAIMessage(content, type = 'assistant', messageId = null) {
             const messagesContainer = document.getElementById('aiChatMessages');
 
@@ -9229,8 +9348,10 @@
                     if (type === 'user') {
                         existingMessage.textContent = content;
                     } else {
-                        existingMessage.innerHTML = content.replace(/\n/g, '<br>');
+                        setAssistantMessageContentHtml(existingMessage, content.replace(/\n/g, '<br>'));
+                        setAIMessageComplete(existingMessage, content !== '');
                     }
+                    updateAIChatHistory(existingMessage, content);
                     messagesContainer.scrollTop = messagesContainer.scrollHeight;
                     return existingMessage;
                 }
@@ -9246,25 +9367,32 @@
             if (type === 'user') {
                 messageDiv.textContent = content;
             } else {
-                messageDiv.innerHTML = content.replace(/\n/g, '<br>');
+                messageDiv.classList.add('assistant');
+                setAIMessageComplete(messageDiv, content !== '');
+
+                const contentEl = document.createElement('div');
+                contentEl.className = 'ai-message-content';
+                contentEl.innerHTML = content.replace(/\n/g, '<br>');
+
+                const footerEl = document.createElement('div');
+                footerEl.className = 'ai-message-footer';
+                const regenBtn = document.createElement('button');
+                regenBtn.type = 'button';
+                regenBtn.className = 'ai-reanswer-btn';
+                regenBtn.title = '重新回答';
+                regenBtn.innerHTML = '<i class="fas fa-sync-alt"></i>';
+                regenBtn.addEventListener('click', () => regenerateAIAnswer(messageDiv));
+                footerEl.appendChild(regenBtn);
+
+                messageDiv.appendChild(contentEl);
+                messageDiv.appendChild(footerEl);
             }
 
             messagesContainer.appendChild(messageDiv);
             messagesContainer.scrollTop = messagesContainer.scrollHeight;
 
             // 保存到聊天历史（按幻灯片索引存储）
-            if (currentSlideIndex >= 0) {
-                if (!aiChatHistory[currentSlideIndex]) {
-                    aiChatHistory[currentSlideIndex] = [];
-                }
-                // 将type转换为role格式，以便后端AI能正确理解
-                const role = type === 'user' ? 'user' : 'assistant';
-                aiChatHistory[currentSlideIndex].push({
-                    role: role,
-                    content: content,
-                    timestamp: Date.now()
-                });
-            }
+            recordAIChatHistory(type, content, messageDiv);
 
             return messageDiv;
         }
@@ -9272,6 +9400,9 @@
         // 添加等待响应动画
         function addWaitingAnimation() {
             const messagesContainer = document.getElementById('aiChatMessages');
+            if (!messagesContainer) return null;
+            removeAllWaitingAnimations();
+
             const waitingDiv = document.createElement('div');
             waitingDiv.className = 'ai-message assistant ai-waiting';
             waitingDiv.id = 'ai-waiting-animation';
@@ -9290,12 +9421,9 @@
             return waitingDiv;
         }
 
-        // 移除等待动画
+        // 移除等待动画（同时清理残留等待气泡）
         function removeWaitingAnimation() {
-            const waitingDiv = document.getElementById('ai-waiting-animation');
-            if (waitingDiv) {
-                waitingDiv.remove();
-            }
+            removeAllWaitingAnimations();
         }
 
         function clearAIMessages() {
@@ -9626,7 +9754,7 @@
         }
 
         // 使用全局母版生成幻灯片HTML内容
-        async function generateSlideWithGlobalTemplate(template, title, content) {
+        async function generateSlideWithGlobalTemplate(template, title, content, slideType = 'content') {
             try {
                 let htmlTemplate = template.html_template;
 
@@ -9634,6 +9762,7 @@
                 htmlTemplate = htmlTemplate.replace(/\{\{\s*page_title\s*\}\}/g, title);
                 htmlTemplate = htmlTemplate.replace(/\{\{\s*main_heading\s*\}\}/g, title);
                 htmlTemplate = htmlTemplate.replace(/\{\{\s*page_content\s*\}\}/g, content);
+                htmlTemplate = htmlTemplate.replace(/\{\{\s*slide_type\s*\}\}/g, slideType || 'content');
                 htmlTemplate = htmlTemplate.replace(/\{\{\s*current_page_number\s*\}\}/g, '1');
                 htmlTemplate = htmlTemplate.replace(/\{\{\s*total_page_count\s*\}\}/g, slidesData.length.toString());
 
@@ -9737,6 +9866,9 @@
                 return;
             }
 
+            // 清理可能残留的等待气泡（避免出现多余“正在思考”气泡）
+            removeAllWaitingAnimations();
+
             // 自动将所有已上传的图片信息嵌入到消息中
             message = autoEmbedUploadedImages(message);
 
@@ -9822,8 +9954,20 @@
                 await handleStreamingResponse(response, waitingDiv);
 
             } catch (error) {
-                removeWaitingAnimation();
-                addAIMessage('抱歉，无法连接到AI服务。请检查网络连接后重试。', 'assistant');
+                const errorText = '抱歉，无法连接到AI服务。请检查网络连接后重试。';
+                if (waitingDiv && waitingDiv.isConnected) {
+                    // 复用当前回答气泡（等待气泡）显示错误，避免新增气泡
+                    waitingDiv.classList.remove('ai-waiting');
+                    waitingDiv.id = 'ai-streaming-message-' + Date.now();
+                    ensureAssistantMessageStructure(waitingDiv);
+                    setAssistantMessageContentHtml(waitingDiv, escapeHtml(errorText).replace(/\n/g, '<br>'));
+                    setAIMessageComplete(waitingDiv, true);
+                    recordAIChatHistory('assistant', errorText, waitingDiv);
+                    removeAllWaitingAnimations();
+                } else {
+                    const msgDiv = addAIMessage(errorText, 'assistant');
+                    setAIMessageComplete(msgDiv, true);
+                }
             } finally {
                 // 恢复发送按钮和输入框
                 isAISending = false;
@@ -9834,12 +9978,142 @@
             }
         }
 
+        // 重新回答（刷新图标触发）：复用当前回答气泡
+        async function regenerateAIAnswer(targetAssistantDiv) {
+            if (!targetAssistantDiv || isAISending) return;
+
+            if (currentSlideIndex < 0 || currentSlideIndex >= slidesData.length) {
+                showNotification('请先选择一个幻灯片', 'warning');
+                return;
+            }
+
+            // 找到该回答对应的上一条用户提问
+            let prev = targetAssistantDiv.previousElementSibling;
+            while (prev) {
+                if (prev.classList && prev.classList.contains('ai-message') && prev.classList.contains('user')) {
+                    break;
+                }
+                prev = prev.previousElementSibling;
+            }
+
+            const message = prev ? (prev.textContent || '').trim() : '';
+            if (!message) {
+                showNotification('未找到对应的提问内容，无法重新回答', 'warning');
+                return;
+            }
+
+            const inputBox = document.getElementById('aiInputBox');
+            const sendBtn = document.getElementById('aiSendBtn');
+
+            // 禁用发送按钮和输入框
+            isAISending = true;
+            if (sendBtn) {
+                sendBtn.disabled = true;
+                sendBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> 响应中...';
+            }
+            if (inputBox) {
+                inputBox.disabled = true;
+            }
+
+            // 复用目标回答气泡：流式开始前标记为未完成并显示等待态
+            setAIMessageComplete(targetAssistantDiv, false);
+            ensureAssistantMessageStructure(targetAssistantDiv);
+            setAssistantMessageContentHtml(targetAssistantDiv, `
+                <div class="ai-typing-indicator">
+                    <span></span><span></span><span></span>
+                </div>
+                <span style="margin-left: 10px;">AI正在重新回答...</span>
+            `);
+
+            try {
+                // 构建AI请求上下文（与 sendAIMessage 保持一致）
+                const currentSlide = slidesData[currentSlideIndex];
+
+                let slideOutline = null;
+                if (projectOutline && projectOutline.slides && projectOutline.slides[currentSlideIndex]) {
+                    slideOutline = projectOutline.slides[currentSlideIndex];
+                }
+
+                // 根据目标回答所在历史位置，截断到对应的用户提问为止，避免把旧回答本身带入上下文
+                let chatHistory = [];
+                if (aiChatHistory[currentSlideIndex]) {
+                    const all = aiChatHistory[currentSlideIndex];
+                    const assistantIdxStr = targetAssistantDiv.getAttribute('data-history-index');
+                    const assistantIdx = assistantIdxStr ? parseInt(assistantIdxStr, 10) : NaN;
+                    let userIdx = -1;
+                    if (Number.isFinite(assistantIdx)) {
+                        for (let i = assistantIdx - 1; i >= 0; i--) {
+                            if (all[i] && all[i].role === 'user') {
+                                userIdx = i;
+                                break;
+                            }
+                        }
+                    }
+                    const sliceEnd = userIdx >= 0 ? (userIdx + 1) : all.length;
+                    chatHistory = all.slice(0, sliceEnd).map(msg => ({ role: msg.role, content: msg.content }));
+                }
+
+                // 捕获幻灯片截图（如果启用了视觉模式）
+                let slideScreenshot = null;
+                if (visionModeEnabled) {
+                    slideScreenshot = await captureSlideScreenshot();
+                }
+
+                // 获取所有已上传的图片信息
+                const referencedImages = getAllUploadedImages();
+
+                const context = {
+                    slideIndex: currentSlideIndex + 1,
+                    slideTitle: currentSlide.title,
+                    slideContent: currentSlide.html_content,
+                    userRequest: message,
+                    slideOutline: slideOutline,
+                    chatHistory: chatHistory,
+                    images: referencedImages,
+                    visionEnabled: visionModeEnabled,
+                    slideScreenshot: slideScreenshot,
+                    projectInfo: {
+                        title: '{{ project.title }}',
+                        topic: '{{ project.topic }}',
+                        scenario: '{{ project.scenario }}'
+                    }
+                };
+
+                const response = await fetch('/api/ai/slide-edit/stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(context)
+                });
+
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                }
+
+                await handleStreamingResponse(response, null, { targetMessageDiv: targetAssistantDiv });
+            } catch (error) {
+                const errText = '抱歉，处理您的请求时出现了错误：' + (error.message || '未知错误');
+                setAssistantMessageContentHtml(targetAssistantDiv, escapeHtml(errText).replace(/\n/g, '<br>'));
+                setAIMessageComplete(targetAssistantDiv, true);
+                updateAIChatHistory(targetAssistantDiv, errText);
+            } finally {
+                isAISending = false;
+                if (sendBtn) {
+                    sendBtn.disabled = false;
+                    sendBtn.innerHTML = '<i class="fas fa-paper-plane"></i> 发送';
+                }
+                if (inputBox) {
+                    inputBox.disabled = false;
+                    inputBox.focus();
+                }
+            }
+        }
+
         // 处理流式响应
-        async function handleStreamingResponse(response, waitingDiv) {
+        async function handleStreamingResponse(response, waitingDiv, options = {}) {
             const reader = response.body.getReader();
             const decoder = new TextDecoder();
             let buffer = '';
-            let aiMessageDiv = null;
+            let aiMessageDiv = options.targetMessageDiv || null;
             let fullResponse = '';
             let newHtmlContent = null;
 
@@ -9861,21 +10135,27 @@
 
                                     if (data.type === 'start') {
                                         // 移除等待动画，开始显示AI回复
-                                        removeWaitingAnimation();
-                                        // 使用时间戳确保每次对话都有唯一的消息ID
-                                        const messageId = 'ai-streaming-message-' + Date.now();
-                                        aiMessageDiv = addAIMessage('', 'assistant', messageId);
+                                        if (waitingDiv && waitingDiv.isConnected) {
+                                            waitingDiv.remove();
+                                        } else {
+                                            removeAllWaitingAnimations();
+                                        }
+
+                                        if (!aiMessageDiv) {
+                                            // 使用时间戳确保每次对话都有唯一的消息ID
+                                            const messageId = 'ai-streaming-message-' + Date.now();
+                                            aiMessageDiv = addAIMessage('', 'assistant', messageId);
+                                        } else {
+                                            setAIMessageComplete(aiMessageDiv, false);
+                                            ensureAssistantMessageStructure(aiMessageDiv);
+                                        }
                                     } else if (data.type === 'content' && data.content) {
                                         // 追加内容到AI消息
                                         fullResponse += data.content;
                                         if (aiMessageDiv) {
                                             // 转义HTML标签，防止实时渲染
-                                            const escapedContent = fullResponse
-                                                .replace(/&/g, '&amp;')
-                                                .replace(/</g, '&lt;')
-                                                .replace(/>/g, '&gt;')
-                                                .replace(/\n/g, '<br>');
-                                            aiMessageDiv.innerHTML = escapedContent;
+                                            const escapedContent = escapeHtml(fullResponse).replace(/\n/g, '<br>');
+                                            setAssistantMessageContentHtml(aiMessageDiv, escapedContent);
                                             // 滚动到底部
                                             const messagesContainer = document.getElementById('aiChatMessages');
                                             messagesContainer.scrollTop = messagesContainer.scrollHeight;
@@ -9899,12 +10179,10 @@
 
                                         // 确保最终内容正确显示，转义HTML标签
                                         if (aiMessageDiv) {
-                                            const escapedContent = fullResponse
-                                                .replace(/&/g, '&amp;')
-                                                .replace(/</g, '&lt;')
-                                                .replace(/>/g, '&gt;')
-                                                .replace(/\n/g, '<br>');
-                                            aiMessageDiv.innerHTML = escapedContent;
+                                            const escapedContent = escapeHtml(fullResponse).replace(/\n/g, '<br>');
+                                            setAssistantMessageContentHtml(aiMessageDiv, escapedContent);
+                                            setAIMessageComplete(aiMessageDiv, true);
+                                            updateAIChatHistory(aiMessageDiv, fullResponse);
                                         }
 
                                         // 如果有HTML内容，添加应用按钮
@@ -9919,8 +10197,23 @@
 
                                         break;
                                     } else if (data.type === 'error') {
-                                        removeWaitingAnimation();
-                                        addAIMessage('抱歉，处理您的请求时出现了错误：' + (data.error || '未知错误'), 'assistant');
+                                        const errText = '抱歉，处理您的请求时出现了错误：' + (data.error || '未知错误');
+
+                                        // 复用当前回答气泡（优先复用目标气泡或已创建的AI气泡；否则复用等待气泡）
+                                        if (!aiMessageDiv && waitingDiv && waitingDiv.isConnected) {
+                                            waitingDiv.classList.remove('ai-waiting');
+                                            waitingDiv.id = 'ai-streaming-message-' + Date.now();
+                                            ensureAssistantMessageStructure(waitingDiv);
+                                            aiMessageDiv = waitingDiv;
+                                            recordAIChatHistory('assistant', '', aiMessageDiv);
+                                        }
+
+                                        if (aiMessageDiv) {
+                                            setAssistantMessageContentHtml(aiMessageDiv, escapeHtml(errText).replace(/\n/g, '<br>'));
+                                            setAIMessageComplete(aiMessageDiv, true);
+                                            updateAIChatHistory(aiMessageDiv, errText);
+                                        }
+                                        removeAllWaitingAnimations();
                                         break;
                                     }
                                 }
@@ -9931,8 +10224,20 @@
                     }
                 }
             } catch (error) {
-                removeWaitingAnimation();
-                addAIMessage('抱歉，处理流式响应时出现了错误。', 'assistant');
+                const errText = '抱歉，处理流式响应时出现了错误。';
+                if (!aiMessageDiv && waitingDiv && waitingDiv.isConnected) {
+                    waitingDiv.classList.remove('ai-waiting');
+                    waitingDiv.id = 'ai-streaming-message-' + Date.now();
+                    ensureAssistantMessageStructure(waitingDiv);
+                    aiMessageDiv = waitingDiv;
+                    recordAIChatHistory('assistant', '', aiMessageDiv);
+                }
+                if (aiMessageDiv) {
+                    setAssistantMessageContentHtml(aiMessageDiv, escapeHtml(errText).replace(/\n/g, '<br>'));
+                    setAIMessageComplete(aiMessageDiv, true);
+                    updateAIChatHistory(aiMessageDiv, errText);
+                }
+                removeAllWaitingAnimations();
             }
         }
 
@@ -9985,7 +10290,7 @@
 
             promptContainer.appendChild(promptText);
             promptContainer.appendChild(extractBtn);
-            messageDiv.appendChild(promptContainer);
+            (getAIMessageContentElement(messageDiv) || messageDiv).appendChild(promptContainer);
         }
 
         // 更激进的HTML提取函数
@@ -10136,7 +10441,7 @@
 
             buttonContainer.appendChild(applyBtn);
             buttonContainer.appendChild(previewBtn);
-            messageDiv.appendChild(buttonContainer);
+            (getAIMessageContentElement(messageDiv) || messageDiv).appendChild(buttonContainer);
 
             console.log('🎉 按钮添加完成！');
             console.log('📋 按钮容器已添加到消息区域');
@@ -10601,9 +10906,6 @@
                         const slide = slidesData[i];
                         if (!slide || !slide.html_content) continue;
 
-                        // 标记为用户编辑状态
-                        slide.is_user_edited = true;
-
                         const success = await saveSingleSlideToServer(i, slide.html_content);
                         if (success) {
                             saveSuccessCount++;
@@ -10634,9 +10936,6 @@
                 for (let i = 0; i < slidesData.length; i++) {
                     try {
                         const slide = slidesData[i];
-
-                        // 标记为用户编辑状态
-                        slide.is_user_edited = true;
 
                         const success = await saveSingleSlideToServer(i, slide.html_content);
                         if (success) {
@@ -10716,9 +11015,10 @@
 
 
 
-                const requestData = {
-                    html_content: htmlContent
-                };
+                const requestData = { html_content: htmlContent };
+                if (slidesData && slidesData[slideIndex] && Object.prototype.hasOwnProperty.call(slidesData[slideIndex], 'is_user_edited')) {
+                    requestData.is_user_edited = !!slidesData[slideIndex].is_user_edited;
+                }
 
 
 
@@ -11842,7 +12142,8 @@
                     newSlide.html_content = await generateSlideWithGlobalTemplate(
                         globalTemplate,
                         newSlide.title,
-                        '复制的幻灯片内容'
+                        '复制的幻灯片内容',
+                        (copiedSlideData && (copiedSlideData.slide_type || copiedSlideData.type)) ? (copiedSlideData.slide_type || copiedSlideData.type) : 'content'
                     );
                 }
 
@@ -11898,7 +12199,8 @@
                     htmlContent = await generateSlideWithGlobalTemplate(
                         globalTemplate,
                         slideTitle,
-                        '新建幻灯片，请编辑内容'
+                        '新建幻灯片，请编辑内容',
+                        'content'
                     );
                 }
 
@@ -11956,7 +12258,8 @@
                         duplicatedSlide.html_content = await generateSlideWithGlobalTemplate(
                             globalTemplate,
                             duplicatedSlide.title,
-                            '复制的幻灯片内容'
+                            '复制的幻灯片内容',
+                            (originalSlide && (originalSlide.slide_type || originalSlide.type)) ? (originalSlide.slide_type || originalSlide.type) : 'content'
                         );
                     }
 

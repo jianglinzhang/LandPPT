@@ -77,187 +77,195 @@
         <div style="margin-top: 30px;">
             <h3 class="section-heading" style="text-align: center;">AI 提供者详情配置</h3>
 
-            <div class="grid">
-                {% for provider in ["openai", "anthropic", "google", "ollama", "302ai"] %}
-                <div class="card provider-config-card" data-provider="{{ provider }}">
-                    <div
-                        style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px;">
-                        <h4 style="color: #111111; margin: 0;">
-                            {% if provider == "openai" %}
-                            OpenAI
-                            {% elif provider == "anthropic" %}
-                            Anthropic Claude
-                            {% elif provider == "google" %}
-                            Google Gemini
-                            {% elif provider == "ollama" %}
-                            Ollama (本地)
-                            {% elif provider == "302ai" %}
-                            302.AI
-                            {% endif %}
-                        </h4>
-
-                        <div style="display: flex; gap: 10px; align-items: center;">
-                            {% if provider_status[provider] %}
-                            <span
-                                style="background: #0f0f0f; color: #f8f8f8; padding: 4px 12px; border-radius: 20px; font-size: 0.8em; border: 1px solid #1f1f1f;">
-                                可用
+            {% set provider_list = supported_providers if supported_providers is defined else ["openai", "deepseek", "kimi", "minimax", "anthropic", "google", "ollama", "302ai"] %}
+            <div class="provider-accordion-list">
+                {% for provider in provider_list %}
+                <details class="provider-accordion provider-config-card" data-provider="{{ provider }}" {% if provider == "openai" %}open{% endif %}>
+                    <summary class="provider-accordion__summary">
+                        <div class="provider-accordion__summary-left">
+                            <span class="provider-accordion__chevron" aria-hidden="true"></span>
+                            <span class="provider-accordion__title">
+                                {% if provider == "openai" %}
+                                OpenAI
+                                {% elif provider == "deepseek" %}
+                                DeepSeek
+                                {% elif provider == "kimi" %}
+                                Kimi
+                                {% elif provider == "minimax" %}
+                                MiniMax
+                                {% elif provider == "anthropic" %}
+                                Anthropic Claude
+                                {% elif provider == "google" %}
+                                Google Gemini
+                                {% elif provider == "ollama" %}
+                                Ollama (本地)
+                                {% elif provider == "302ai" %}
+                                302.AI
+                                {% endif %}
                             </span>
+
+                            {% if provider_status.get(provider, False) %}
+                            <span class="provider-accordion__pill provider-accordion__pill--ok">可用</span>
                             {% else %}
-                            <span
-                                style="background: #e0e0e0; color: #111111; padding: 4px 12px; border-radius: 20px; font-size: 0.8em; border: 1px solid #c2c2c2;">
-                                不可用
-                            </span>
+                            <span class="provider-accordion__pill provider-accordion__pill--off">未配置</span>
                             {% endif %}
+                        </div>
 
+                        <div class="provider-accordion__summary-right" data-no-toggle="true">
                             <div class="custom-radio">
                                 <input type="radio" name="default_provider" value="{{ provider }}"
                                     id="provider_{{ provider }}" {% if current_provider==provider %}checked{% endif %}
-                                    onchange="setDefaultProvider('{{ provider }}')">
-                                <label for="provider_{{ provider }}" class="radio-label">默认</label>
+                                    onchange="setDefaultProvider('{{ provider }}')" onclick="event.stopPropagation();">
+                                <label for="provider_{{ provider }}" class="radio-label" onclick="event.stopPropagation();">默认</label>
                             </div>
-                        </div>
-                    </div>
 
-                    <!-- 提供者配置表单 -->
-                    <div class="provider-config-form">
-                        {% if provider == "openai" %}
-                        <div class="form-group">
-                            <label>API Key:</label>
-                            <input type="password" name="openai_api_key" placeholder="sk-..."
-                                value="{{ current_config.get('openai_api_key', '') }}"
-                                style="font-family: monospace; font-size: 0.9em;">
-                        </div>
-                        <div class="form-group">
-                            <label>Base URL:</label>
-                            <input type="text" name="openai_base_url"
-                                value="{{ current_config.get('openai_base_url', '') }}"
-                                placeholder="{{ current_config.get('openai_base_url', 'https://api.openai.com/v1') }}">
-                        </div>
-                        <div class="form-group">
-                            <label>默认模型:</label>
-                            <div class="model-input-container">
-                                <div class="searchable-select-container" id="openai_model_container"
-                                    style="display: none;">
-                                    <input type="text" class="searchable-select-input" id="openai_model_search"
-                                        placeholder="搜索模型...">
-                                    <div class="searchable-select-dropdown" id="openai_model_dropdown">
-                                        <div class="searchable-select-option" data-value="">选择模型...</div>
-                                    </div>
-                                </div>
-                                <input type="text" name="openai_model" id="openai_model_input" class="model-input"
-                                    value="{{ current_config.get('openai_model', '') }}"
-                                    placeholder="{{ current_config.get('openai_model', 'gpt-4o') }}">
-                                <button type="button" onclick="fetchAndShowModels()" id="openai_model_fetch_btn"
-                                    class="model-fetch-btn" title="获取可用模型列表">
-                                    列表
-                                </button>
-                            </div>
-                        </div>
-                        {% elif provider == "anthropic" %}
-                        <div class="form-group">
-                            <label>API Key:</label>
-                            <input type="password" name="anthropic_api_key" placeholder="sk-ant-..."
-                                value="{{ current_config.get('anthropic_api_key', '') }}"
-                                style="font-family: monospace; font-size: 0.9em;">
-                        </div>
-                        <div class="form-group">
-                            <label>Base URL:</label>
-                            <input type="text" name="anthropic_base_url"
-                                value="{{ current_config.get('anthropic_base_url', '') }}"
-                                placeholder="{{ current_config.get('anthropic_base_url', 'https://api.anthropic.com') }}">
-                        </div>
-                        <div class="form-group">
-                            <label>默认模型:</label>
-                            <input type="text" name="anthropic_model"
-                                value="{{ current_config.get('anthropic_model', '') }}"
-                                placeholder="{{ current_config.get('anthropic_model', 'claude-3-5-sonnet-20241022') }}">
-                        </div>
-                        {% elif provider == "google" %}
-                        <div class="form-group">
-                            <label>API Key:</label>
-                            <input type="password" name="google_api_key" placeholder="your-google-api-key"
-                                value="{{ current_config.get('google_api_key', '') }}"
-                                style="font-family: monospace; font-size: 0.9em;">
-                        </div>
-                        <div class="form-group">
-                            <label>Base URL:</label>
-                            <input type="text" name="google_base_url"
-                                value="{{ current_config.get('google_base_url', '') }}"
-                                placeholder="{{ current_config.get('google_base_url', 'https://generativelanguage.googleapis.com') }}">
-                        </div>
-                        <div class="form-group">
-                            <label>默认模型:</label>
-                            <input type="text" name="google_model" value="{{ current_config.get('google_model', '') }}"
-                                placeholder="{{ current_config.get('google_model', 'gemini-2.5-flash') }}">
-                        </div>
-                        {% elif provider == "ollama" %}
-                        <div class="form-group">
-                            <label>Base URL:</label>
-                            <input type="text" name="ollama_base_url"
-                                value="{{ current_config.get('ollama_base_url', '') }}"
-                                placeholder="{{ current_config.get('ollama_base_url', 'http://localhost:11434') }}">
-                        </div>
-                        <div class="form-group">
-                            <label>默认模型:</label>
-                            <input type="text" name="ollama_model" value="{{ current_config.get('ollama_model', '') }}"
-                                placeholder="{{ current_config.get('ollama_model', 'auto（自动选择已安装模型）, llama3.2:latest, qwen2.5:latest...') }}">
-                        </div>
-                        {% elif provider == "302ai" %}
-                        <div class="form-group">
-                            <label>API Key:</label>
-                            <input type="password" name="302ai_api_key" placeholder="sk-..."
-                                value="{{ current_config.get('302ai_api_key', '') }}"
-                                style="font-family: monospace; font-size: 0.9em;">
-                            <small style="color: #2b2b2b;"><a href="https://share.302.ai/5ml9vD" target="_blank"
-                                    style="color: #2b2b2b; text-decoration: underline;">点击获取</a></small>
-                        </div>
-                        <input type="hidden" name="302ai_base_url" value="https://api.302.ai/v1">
-                        <div class="form-group">
-                            <label>默认模型:</label>
-                            <div class="model-input-container">
-                                <div class="searchable-select-container" id="302ai_model_container"
-                                    style="display: none;">
-                                    <input type="text" class="searchable-select-input" id="302ai_model_search"
-                                        placeholder="搜索模型...">
-                                    <div class="searchable-select-dropdown" id="302ai_model_dropdown">
-                                        <div class="searchable-select-option" data-value="">选择模型...</div>
-                                    </div>
-                                </div>
-                                <input type="text" name="302ai_model" id="302ai_model_input" class="model-input"
-                                    value="{{ current_config.get('302ai_model', '') }}"
-                                    placeholder="{{ current_config.get('302ai_model', 'gpt-4o') }}">
-                                <button type="button" onclick="fetch302AIModels()" id="302ai_model_fetch_btn"
-                                    class="model-fetch-btn" title="获取可用模型列表">
-                                    列表
-                                </button>
-                            </div>
-                        </div>
-                        {% endif %}
-                    </div>
+                            <button type="button" class="provider-accordion__icon-btn" data-no-toggle="true"
+                                title="测试" onclick="event.stopPropagation(); testProvider('{{ provider }}')" aria-label="测试">
+                                <span class="provider-accordion__icon provider-accordion__icon--test" aria-hidden="true"></span>
+                            </button>
 
-                    <div style="text-align: center; margin-top: 15px;">
-                        <button onclick="testProvider('{{ provider }}')" class="btn btn-primary"
-                            style="margin-right: 10px;">
-                            测试
-                        </button>
-                        <button onclick="saveProviderConfig('{{ provider }}')" class="btn btn-success">
-                            保存配置
-                        </button>
+                            <button type="button" class="btn btn-primary provider-accordion__save-btn" data-no-toggle="true"
+                                onclick="event.stopPropagation(); saveProviderConfig('{{ provider }}')">
+                                保存
+                            </button>
+                        </div>
+                    </summary>
+
+                    <div class="provider-accordion__body">
+                        <div class="provider-accordion__fields">
+                            {% if provider in ["openai", "deepseek", "kimi", "minimax", "302ai"] %}
+                            {% set provider_api_key = current_config.get(provider ~ '_api_key', '') %}
+                            {% set provider_base_url = current_config.get(provider ~ '_base_url', '') %}
+                            {% set provider_model = current_config.get(provider ~ '_model', '') %}
+                            <div class="form-group">
+                                <label>API Key</label>
+                                <input type="password" name="{{ provider }}_api_key" placeholder="sk-..."
+                                    value="{{ provider_api_key }}"
+                                    style="font-family: monospace; font-size: 0.9em;">
+                                {% if provider == "302ai" %}
+                                <small style="color: #2b2b2b;"><a href="https://share.302.ai/5ml9vD" target="_blank"
+                                        style="color: #2b2b2b; text-decoration: underline;">点击获取</a></small>
+                                {% endif %}
+                            </div>
+
+                            <div class="form-group">
+                                <label>Base URL</label>
+                                {% if provider == "302ai" %}
+                                <input type="hidden" name="302ai_base_url" value="https://api.302.ai/v1">
+                                <input type="text" value="https://api.302.ai/v1" disabled>
+                                {% else %}
+                                {% if (not provider_api_key) and provider == 'minimax' and (not provider_base_url or provider_base_url == 'https://api.minimax.chat/v1') %}
+                                    {% set provider_base_url = 'https://api.minimaxi.com/v1' %}
+                                {% endif %}
+                                <input type="text" name="{{ provider }}_base_url"
+                                    value="{{ provider_base_url }}"
+                                    placeholder="{% if provider == 'openai' %}https://api.openai.com/v1{% elif provider == 'deepseek' %}https://api.deepseek.com/v1{% elif provider == 'kimi' %}https://api.moonshot.cn/v1{% elif provider == 'minimax' %}https://api.minimaxi.com/v1{% else %}https://api.openai.com/v1{% endif %}">
+                                {% endif %}
+                            </div>
+
+                            <div class="form-group provider-accordion__model-row">
+                                <label>默认模型</label>
+                                <div class="model-input-container">
+                                    <div class="searchable-select-container" id="{{ provider }}_model_container"
+                                        style="display: none;">
+                                        <input type="text" class="searchable-select-input" id="{{ provider }}_model_search"
+                                            placeholder="搜索模型...">
+                                        <div class="searchable-select-dropdown" id="{{ provider }}_model_dropdown">
+                                            <div class="searchable-select-option" data-value="">选择模型...</div>
+                                        </div>
+                                    </div>
+                                    {% if not provider_api_key %}
+                                        {% if provider == 'kimi' and (not provider_model or provider_model == 'moonshot-v1-8k') %}
+                                            {% set provider_model = 'kimi-k2.5' %}
+                                        {% elif provider == 'minimax' and (not provider_model or provider_model == 'MiniMax-Text-01') %}
+                                            {% set provider_model = 'MiniMax-M2.1' %}
+                                        {% endif %}
+                                    {% endif %}
+                                    <input type="text" name="{{ provider }}_model" id="{{ provider }}_model_input" class="model-input"
+                                        value="{{ provider_model }}"
+                                        placeholder="{% if provider == 'openai' %}gpt-4o{% elif provider == 'deepseek' %}deepseek-chat{% elif provider == 'kimi' %}kimi-k2.5{% elif provider == 'minimax' %}MiniMax-M2.1{% elif provider == '302ai' %}gpt-4o{% else %}model{% endif %}">
+                                    {% if provider == "302ai" %}
+                                    <button type="button" onclick="fetch302AIModels()" id="{{ provider }}_model_fetch_btn"
+                                        class="model-fetch-btn" title="获取可用模型列表">
+                                        ▾
+                                    </button>
+                                    {% else %}
+                                    <button type="button" onclick="fetchAndShowModels('{{ provider }}')" id="{{ provider }}_model_fetch_btn"
+                                        class="model-fetch-btn" title="获取可用模型列表">
+                                        ▾
+                                    </button>
+                                    {% endif %}
+                                </div>
+                            </div>
+
+                            {% elif provider == "anthropic" %}
+                            <div class="form-group">
+                                <label>API Key</label>
+                                <input type="password" name="anthropic_api_key" placeholder="sk-ant-..."
+                                    value="{{ current_config.get('anthropic_api_key', '') }}"
+                                    style="font-family: monospace; font-size: 0.9em;">
+                            </div>
+                            <div class="form-group">
+                                <label>Base URL</label>
+                                <input type="text" name="anthropic_base_url"
+                                    value="{{ current_config.get('anthropic_base_url', '') }}"
+                                    placeholder="https://api.anthropic.com">
+                            </div>
+                            <div class="form-group provider-accordion__model-row">
+                                <label>默认模型</label>
+                                <input type="text" name="anthropic_model"
+                                    value="{{ current_config.get('anthropic_model', '') }}"
+                                    placeholder="claude-3-5-sonnet-20241022">
+                            </div>
+
+                            {% elif provider == "google" %}
+                            <div class="form-group">
+                                <label>API Key</label>
+                                <input type="password" name="google_api_key" placeholder="your-google-api-key"
+                                    value="{{ current_config.get('google_api_key', '') }}"
+                                    style="font-family: monospace; font-size: 0.9em;">
+                            </div>
+                            <div class="form-group">
+                                <label>Base URL</label>
+                                <input type="text" name="google_base_url"
+                                    value="{{ current_config.get('google_base_url', '') }}"
+                                    placeholder="https://generativelanguage.googleapis.com">
+                            </div>
+                            <div class="form-group provider-accordion__model-row">
+                                <label>默认模型</label>
+                                <input type="text" name="google_model" value="{{ current_config.get('google_model', '') }}"
+                                    placeholder="gemini-2.5-flash">
+                            </div>
+
+                            {% elif provider == "ollama" %}
+                            <div class="form-group">
+                                <label>Base URL</label>
+                                <input type="text" name="ollama_base_url"
+                                    value="{{ current_config.get('ollama_base_url', '') }}"
+                                    placeholder="http://localhost:11434">
+                            </div>
+                            <div class="form-group provider-accordion__model-row">
+                                <label>默认模型</label>
+                                <input type="text" name="ollama_model" value="{{ current_config.get('ollama_model', '') }}"
+                                    placeholder="auto / llama3.2:latest / qwen2.5:latest ...">
+                            </div>
+                            {% endif %}
+                        </div>
                     </div>
-                </div>
+                </details>
                 {% endfor %}
             </div>
         </div>
 
         <!-- 模型任务配置-->
-        <div id="model-roles">
-            <div style="margin: 0 auto;">
+        <div id="model-roles" class="model-roles-section">
+            <div class="model-roles-wrapper">
                 <div class="card" style="margin-bottom: 20px;">
                     <div
                         style="display: flex; justify-content: space-between; align-items: center; gap: 12px; flex-wrap: wrap;">
                         <div>
                             <h3 class="section-heading" style="margin-bottom: 6px;">模型任务配置</h3>
-                            <p style="color: #7f8c8d; margin: 0;">该区域为高级设置，可为不同功能指定专用提供者和模型，未设置时将继承默认配置。</p>
+                            <p class="model-roles-description">该区域为高级设置，可为不同功能指定专用提供者和模型，未设置时将继承默认配置。</p>
                         </div>
                         <button type="button" id="model-role-toggle-btn" class="btn btn-secondary"
                             style="min-width: 140px;" onclick="toggleModelRoleSettings()">
@@ -289,17 +297,25 @@
                         ] %}
                         {% for role in model_roles %}
                         <div class="card" data-role-model-field="{{ role.model_field }}">
-                            <h4 style="color: #111111; margin-bottom: 15px;">{{ role.label }}</h4>
+                            <h4 class="model-role-card-title">{{ role.label }}</h4>
                             <div class="form-group" style="margin-bottom: 15px;">
                                 <label>首选提供者</label>
-                                <select name="{{ role.provider_field }}" class="model-role-provider"
-                                    data-model-field="{{ role.model_field }}"
-                                    style="width: 100%; padding: 10px; border: 1px solid #dcdcdc; border-radius: 6px;">
+                                <select name="{{ role.provider_field }}" class="model-role-provider model-role-select"
+                                    data-model-field="{{ role.model_field }}">
                                     <option value="">使用默认提供者</option>
-                                    {% for provider in available_providers %}
-                                    <option value="{{ provider }}" {% if
-                                        current_config.get(role.provider_field)==provider %}selected{% endif %}>{{
-                                        provider }}</option>
+                                    {% for provider in supported_providers if provider_status.get(provider, False) %}
+                                    <option value="{{ provider }}" {% if current_config.get(role.provider_field)==provider %}selected{% endif %}>
+                                        {% if provider == "openai" %}OpenAI
+                                        {% elif provider == "deepseek" %}DeepSeek
+                                        {% elif provider == "kimi" %}Kimi
+                                        {% elif provider == "minimax" %}MiniMax
+                                        {% elif provider == "anthropic" %}Anthropic Claude
+                                        {% elif provider == "google" %}Google Gemini
+                                        {% elif provider == "ollama" %}Ollama (本地)
+                                        {% elif provider == "302ai" %}302.AI
+                                        {% else %}{{ provider }}
+                                        {% endif %}
+                                    </option>
                                     {% endfor %}
                                 </select>
                             </div>
@@ -322,7 +338,7 @@
                                     <button type="button" class="model-fetch-btn openai-fetch-btn"
                                         data-model-field="{{ role.model_field }}" onclick="fetchRoleOpenAIModels(this)"
                                         style="display: none;" title="获取可用模型列表">
-                                        列表
+                                        ▾
                                     </button>
                                 </div>
                                 <small style="color: #7f8c8d;">留空表示继承该提供者默认模型</small>
@@ -1481,6 +1497,243 @@
         box-shadow: 0 15px 35px rgba(0, 0, 0, 0.16);
     }
 
+    /* 新的提供者折叠布局（参考设置中心样式） */
+    .provider-accordion-list {
+        display: flex;
+        flex-direction: column;
+        gap: 12px;
+        max-width: 1100px;
+        margin: 0 auto;
+    }
+
+    /* 模型任务配置：与提供者列表统一宽度/节奏 */
+    .model-roles-section {
+        margin-top: 18px;
+    }
+
+    .model-roles-wrapper {
+        max-width: 1100px;
+        margin: 0 auto;
+    }
+
+    .model-roles-description {
+        color: var(--ai-muted);
+        margin: 0;
+    }
+
+    .model-role-card-title {
+        color: var(--ai-contrast);
+        margin: 0 0 15px 0;
+        font-weight: 650;
+    }
+
+    .model-role-select {
+        width: 100%;
+        padding: 10px 14px;
+        border: 2px solid rgba(17, 17, 17, 0.14);
+        border-radius: 10px;
+        background: #ffffff;
+        transition: all 0.2s ease;
+    }
+
+    .model-role-select:focus {
+        border-color: #0f0f0f;
+        box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.12);
+        outline: none;
+    }
+
+    .provider-accordion.provider-config-card {
+        background: var(--ai-surface);
+        border: 1px solid var(--ai-border);
+        border-radius: var(--border-radius-lg, 16px);
+        overflow: hidden;
+        box-shadow: 0 16px 36px rgba(15, 23, 42, 0.08);
+        transform: none;
+    }
+
+    .provider-accordion.provider-config-card:hover {
+        transform: none;
+        box-shadow: 0 8px 22px rgba(0, 0, 0, 0.08);
+    }
+
+    .provider-accordion__summary {
+        list-style: none;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 12px;
+        padding: 14px 18px;
+        cursor: pointer;
+        user-select: none;
+        background: var(--ai-surface-strong);
+    }
+
+    .provider-accordion__summary::-webkit-details-marker {
+        display: none;
+    }
+
+    .provider-accordion__summary-left {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+        min-width: 0;
+    }
+
+    .provider-accordion__chevron {
+        width: 18px;
+        height: 18px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex: 0 0 auto;
+    }
+
+    .provider-accordion__chevron::before {
+        content: "";
+        width: 8px;
+        height: 8px;
+        border-right: 2px solid #6b6b6b;
+        border-bottom: 2px solid #6b6b6b;
+        transform: rotate(-45deg);
+        transition: transform 0.15s ease;
+    }
+
+    .provider-accordion[open] .provider-accordion__chevron::before {
+        transform: rotate(45deg);
+    }
+
+    .provider-accordion__title {
+        font-size: 1.05rem;
+        font-weight: 650;
+        color: #111111;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+    }
+
+    .provider-accordion__pill {
+        display: inline-flex;
+        align-items: center;
+        padding: 4px 12px;
+        border-radius: 999px;
+        font-size: 0.82rem;
+        border: 1px solid transparent;
+        flex: 0 0 auto;
+    }
+
+    .provider-accordion__pill--ok {
+        background: #111111;
+        color: #ffffff;
+        border-color: #1f1f1f;
+    }
+
+    .provider-accordion__pill--off {
+        background: #e9e9e9;
+        color: #111111;
+        border-color: #d3d3d3;
+    }
+
+    .provider-accordion__summary-right {
+        display: inline-flex;
+        align-items: center;
+        gap: 10px;
+        flex: 0 0 auto;
+    }
+
+    .provider-accordion__icon-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 40px;
+        height: 34px;
+        border-radius: 12px;
+        border: 1px solid var(--ai-border);
+        background: rgba(255, 255, 255, 0.78);
+        color: var(--ai-contrast);
+    }
+
+    .provider-accordion__icon-btn:hover {
+        background: rgba(17, 17, 17, 0.06);
+    }
+
+    .provider-accordion__icon {
+        width: 18px;
+        height: 18px;
+        display: inline-block;
+        background: currentColor;
+    }
+
+    .provider-accordion__icon--test {
+        -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M9 2a1 1 0 0 0 0 2v5.6l-4.3 7.45A4 4 0 0 0 8.16 23h7.68a4 4 0 0 0 3.46-5.95L15 9.6V4a1 1 0 1 0 0-2H9Zm2 2h2v6.13l.14.24 4.44 7.69A2 2 0 0 1 15.84 21H8.16a2 2 0 0 1-1.74-2.99l4.44-7.69.14-.24V4Zm-2.15 12 2.1 3.6h2.1l2.1-3.6h-6.3Z'/%3E%3C/svg%3E") no-repeat center / contain;
+        mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath d='M9 2a1 1 0 0 0 0 2v5.6l-4.3 7.45A4 4 0 0 0 8.16 23h7.68a4 4 0 0 0 3.46-5.95L15 9.6V4a1 1 0 1 0 0-2H9Zm2 2h2v6.13l.14.24 4.44 7.69A2 2 0 0 1 15.84 21H8.16a2 2 0 0 1-1.74-2.99l4.44-7.69.14-.24V4Zm-2.15 12 2.1 3.6h2.1l2.1-3.6h-6.3Z'/%3E%3C/svg%3E") no-repeat center / contain;
+    }
+
+    .provider-accordion__save-btn {
+        padding: 8px 14px;
+        border-radius: 10px;
+        line-height: 1;
+        font-weight: 650;
+    }
+
+    .provider-accordion__body {
+        border-top: 1px solid #f0f0f0;
+        padding: 16px;
+        background: var(--ai-surface);
+    }
+
+    .provider-accordion__fields {
+        display: grid;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+        gap: 14px 18px;
+    }
+
+    .provider-accordion__fields .form-group {
+        margin-bottom: 0;
+    }
+
+    .provider-accordion__fields .form-group label {
+        display: block;
+        font-size: 0.9rem;
+        font-weight: 650;
+        color: var(--ai-contrast);
+        margin-bottom: 6px;
+    }
+
+    .provider-accordion__fields .form-group input:not(.model-input):not(.searchable-select-input),
+    .provider-accordion__fields .form-group select {
+        width: 100%;
+        padding: 10px 14px;
+        border: 2px solid rgba(17, 17, 17, 0.14);
+        border-radius: 10px;
+        background: #ffffff;
+        transition: all 0.2s ease;
+    }
+
+    .provider-accordion__fields .form-group input:not(.model-input):not(.searchable-select-input):focus,
+    .provider-accordion__fields .form-group select:focus {
+        border-color: #0f0f0f;
+        box-shadow: 0 0 0 3px rgba(0, 0, 0, 0.12);
+        outline: none;
+    }
+
+    .provider-accordion__fields .form-group input:not(.model-input):disabled {
+        background: rgba(17, 17, 17, 0.04);
+        color: rgba(17, 17, 17, 0.72);
+    }
+
+    .provider-accordion__model-row {
+        grid-column: 1 / -1;
+    }
+
+    @media (max-width: 900px) {
+        .provider-accordion__fields {
+            grid-template-columns: 1fr;
+        }
+        .provider-accordion__summary {
+            flex-wrap: wrap;
+        }
+    }
+
     .provider-config-card,
     #model-role-settings .card {
         overflow: visible;
@@ -2027,7 +2280,8 @@
         border-radius: 6px;
         background: #f8f9fa;
         cursor: pointer;
-        font-size: 14px;
+        font-size: 18px;
+        font-weight: 700;
         display: flex;
         align-items: center;
         justify-content: center;
@@ -2735,7 +2989,8 @@
     }
 
     // 初始化搜索选择框实例
-    let openaiModelSelect, ai302ModelSelect;
+    const openaiCompatibleModelSelects = {};
+    let ai302ModelSelect;
 
     // 初始化
     document.addEventListener('DOMContentLoaded', function () {
@@ -2749,12 +3004,17 @@
         initModelRoleProviderListeners();
     });
 
+    // provider accordion actions are handled via stopPropagation on buttons/radios
+
     // 初始化搜索选择框
     function initSearchableSelects() {
-        // 初始化OpenAI模型搜索选择框
-        if (document.getElementById('openai_model_container')) {
-            openaiModelSelect = new SearchableSelect('openai_model_container');
-        }
+        // 初始化OpenAI兼容提供者的模型搜索选择框
+        ['openai', 'deepseek', 'kimi', 'minimax'].forEach(provider => {
+            const containerId = `${provider}_model_container`;
+            if (document.getElementById(containerId)) {
+                openaiCompatibleModelSelects[provider] = new SearchableSelect(containerId);
+            }
+        });
 
         // 初始化302AI模型搜索选择框
         if (document.getElementById('302ai_model_container')) {
@@ -2879,7 +3139,10 @@
             let testResult;
             switch (providerName) {
                 case 'openai':
-                    testResult = await testOpenAIProvider(config);
+                case 'deepseek':
+                case 'kimi':
+                case 'minimax':
+                    testResult = await testOpenAICompatibleProvider(providerName, config);
                     break;
                 case 'anthropic':
                     testResult = await testAnthropicProvider(config);
@@ -2903,43 +3166,63 @@
         }
     }
 
-    // 测试 OpenAI 提供者（仅通过后端代理）
-    async function testOpenAIProvider(config) {
+    // 测试 OpenAI 兼容提供者（仅通过后端代理）
+    async function testOpenAICompatibleProvider(providerName, config) {
         try {
+            const provider = (providerName || 'openai').toLowerCase();
+            const defaultBaseUrls = {
+                openai: 'https://api.openai.com/v1',
+                deepseek: 'https://api.deepseek.com/v1',
+                kimi: 'https://api.moonshot.cn/v1',
+                minimax: 'https://api.minimaxi.com/v1'
+            };
+            const defaultModels = {
+                openai: 'gpt-4o',
+                deepseek: 'deepseek-chat',
+                kimi: 'kimi-k2.5',
+                minimax: 'MiniMax-M2.1'
+            };
+
             // 获取配置 - 使用前端页面填写的信息
-            let apiKey = config.openai_api_key;
-            let baseUrl = config.openai_base_url;
-            let model = config.openai_model;
+            let apiKey = config[`${provider}_api_key`];
+            let baseUrl = config[`${provider}_base_url`];
+            let model = config[`${provider}_model`];
 
             // 如果前端没有填写API Key，尝试从后端获取
-            if (!apiKey) {
+            if (!apiKey || !baseUrl || !model) {
                 const configResponse = await fetch('/api/config/ai_providers');
                 if (configResponse.ok) {
                     const configResult = await configResponse.json();
-                    if (configResult.success && configResult.config.openai_api_key) {
-                        apiKey = configResult.config.openai_api_key;
+                    if (!apiKey && configResult.success && configResult.config && configResult.config[`${provider}_api_key`]) {
+                        apiKey = configResult.config[`${provider}_api_key`];
+                    }
+                    if (!baseUrl && configResult.success && configResult.config && configResult.config[`${provider}_base_url`]) {
+                        baseUrl = configResult.config[`${provider}_base_url`];
+                    }
+                    if (!model && configResult.success && configResult.config && configResult.config[`${provider}_model`]) {
+                        model = configResult.config[`${provider}_model`];
                     }
                 }
             }
 
             // 如果仍然没有API Key，提示用户
             if (!apiKey) {
-                throw new Error('请先配置 OpenAI API Key');
+                throw new Error(`请先配置 ${provider} API Key`);
             }
 
             // 如果没有填写 Base URL，使用默认值
             if (!baseUrl) {
-                baseUrl = 'https://api.openai.com/v1';
+                baseUrl = defaultBaseUrls[provider] || 'https://api.openai.com/v1';
             }
 
             // 如果没有填写模型，使用默认值
             if (!model) {
-                model = 'gpt-4o';
+                model = defaultModels[provider] || 'gpt-4o';
             }
 
             // 确保 Base URL 格式正确
             if (!baseUrl.endsWith('/v1')) {
-                baseUrl = baseUrl.endsWith('/') ? baseUrl + 'v1' : baseUrl + '/v1';
+                baseUrl = baseUrl.replace(/\/+$/, '') + '/v1';
             }
 
             // 只通过后端代理测试，避免CORS问题
@@ -2981,7 +3264,7 @@
                 // 标准化响应格式
                 return {
                     success: true,
-                    provider: proxyResult.provider || 'openai',
+                    provider: provider,
                     model: proxyResult.model || model,
                     response_preview: proxyResult.response_preview || '',
                     usage: proxyResult.usage || {
@@ -2996,7 +3279,7 @@
                 // 如果没有明确的状态字段，假设成功（因为HTTP状态码是200）
                 return {
                     success: true,
-                    provider: proxyResult.provider || 'openai',
+                    provider: provider,
                     model: proxyResult.model || model,
                     response_preview: proxyResult.response_preview || '',
                     usage: proxyResult.usage || {
@@ -3011,7 +3294,7 @@
             return {
                 success: false,
                 error: error.message,
-                detail: `OpenAI 测试失败: ${error.message}`
+                detail: `${providerName} 测试失败: ${error.message}`
             };
         }
     }
@@ -3266,7 +3549,6 @@
                             content: 'Say "Hello, I am working!" in exactly 5 words.'
                         }
                     ],
-                    temperature: 0
                 })
             });
 
@@ -3419,8 +3701,7 @@
                             role: 'user',
                             content: 'Say "Hello, I am working!" in exactly 5 words.'
                         }
-                    ],
-                    temperature: 0
+                    ]
                 })
             });
 
@@ -3566,8 +3847,8 @@
 
         const selectedProvider = selectElement.value.toLowerCase();
 
-        // 只有选择openai或302ai时显示按钮
-        if (selectedProvider === 'openai' || selectedProvider === '302ai') {
+        // 只有选择 OpenAI 兼容提供者 或 302ai 时显示按钮
+        if (['openai', 'deepseek', 'kimi', 'minimax', '302ai'].includes(selectedProvider)) {
             fetchBtn.style.display = 'flex';
         } else {
             fetchBtn.style.display = 'none';
@@ -3603,21 +3884,27 @@
 
             let models = null;
 
-            if (provider === 'openai') {
-                // 获取OpenAI配置
-                const apiKeyInput = providerCard.querySelector('input[name="openai_api_key"]');
-                const baseUrlInput = providerCard.querySelector('input[name="openai_base_url"]');
+            if (['openai', 'deepseek', 'kimi', 'minimax'].includes(provider)) {
+                const defaultBaseUrls = {
+                    openai: 'https://api.openai.com/v1',
+                    deepseek: 'https://api.deepseek.com/v1',
+                    kimi: 'https://api.moonshot.cn/v1',
+                    minimax: 'https://api.minimaxi.com/v1'
+                };
+
+                const apiKeyInput = providerCard.querySelector(`input[name="${provider}_api_key"]`);
+                const baseUrlInput = providerCard.querySelector(`input[name="${provider}_base_url"]`);
 
                 const apiKey = apiKeyInput ? apiKeyInput.value.trim() : '';
                 let baseUrl = baseUrlInput ? baseUrlInput.value.trim() : '';
 
                 if (!apiKey) {
-                    showNotification('请先配置OpenAI API Key', 'warning');
+                    showNotification(`请先配置 ${provider} API Key`, 'warning');
                     return;
                 }
 
                 if (!baseUrl) {
-                    baseUrl = 'https://api.openai.com/v1';
+                    baseUrl = defaultBaseUrls[provider] || 'https://api.openai.com/v1';
                 }
 
                 models = await fetchOpenAIModels(baseUrl, apiKey);
@@ -3681,7 +3968,7 @@
         } finally {
             buttonElement.disabled = false;
             buttonElement.classList.remove('loading');
-            buttonElement.innerHTML = '列表';
+            buttonElement.innerHTML = '▾';
         }
     }
 
@@ -3838,7 +4125,11 @@
             if (response.ok) {
                 const result = await response.json();
                 if (result.success) {
-                    showNotification(`默认提供者已设置为 ${provider}，配置已实时生效`, 'success');
+                    if (result.config_applied === false) {
+                        showNotification(`默认提供者已提交为 ${provider}，但后端未确认生效（current_provider=${result.current_provider}）`, 'warning');
+                    } else {
+                        showNotification(`默认提供者已设置为 ${provider}，配置已实时生效`, 'success');
+                    }
 
                     // 更新页面显示的当前提供者
                     updateCurrentProviderDisplay(provider);
@@ -3851,7 +4142,14 @@
                     showNotification('设置默认提供者失败: ' + (result.message || '未知错误'), 'error');
                 }
             } else {
-                showNotification('设置默认提供者失败', 'error');
+                let errorMsg = `HTTP ${response.status}: ${response.statusText}`;
+                try {
+                    const errorData = await response.json();
+                    if (errorData.detail) errorMsg = errorData.detail;
+                    else if (errorData.message) errorMsg = errorData.message;
+                    else if (errorData.error) errorMsg = errorData.error;
+                } catch (_) { }
+                showNotification('设置默认提供者失败: ' + errorMsg, 'error');
             }
 
             closeTestModal();
@@ -4561,41 +4859,43 @@
         }
     }
 
-    // 获取并显示OpenAI模型列表
-    async function fetchAndShowModels() {
-        const inputElement = document.getElementById('openai_model_input');
-        const fetchButton = document.getElementById('openai_model_fetch_btn');
-        const containerElement = document.getElementById('openai_model_container');
+    // 获取并显示OpenAI兼容提供者模型列表
+    async function fetchAndShowModels(providerName = 'openai') {
+        const provider = (providerName || 'openai').toLowerCase();
+        const inputElement = document.getElementById(`${provider}_model_input`);
+        const fetchButton = document.getElementById(`${provider}_model_fetch_btn`);
+        const containerElement = document.getElementById(`${provider}_model_container`);
+        const modelSelect = openaiCompatibleModelSelects[provider];
 
-        if (!inputElement || !fetchButton || !openaiModelSelect) return;
+        if (!inputElement || !fetchButton || !containerElement || !modelSelect) return;
+
+        const defaultBaseUrls = {
+            openai: 'https://api.openai.com/v1',
+            deepseek: 'https://api.deepseek.com/v1',
+            kimi: 'https://api.moonshot.cn/v1',
+            minimax: 'https://api.minimaxi.com/v1'
+        };
 
         try {
-            // 设置加载状态
             fetchButton.classList.add('loading');
             fetchButton.disabled = true;
             fetchButton.textContent = '⏳';
 
-            // 获取Base URL - 只使用前端页面填写的信息
-            const baseUrlInput = document.querySelector('input[name="openai_base_url"]');
-            let baseUrl = baseUrlInput ? baseUrlInput.value.trim() : '';
+            const card = document.querySelector(`[data-provider="${provider}"]`);
+            const baseUrlInput = card ? card.querySelector(`input[name="${provider}_base_url"]`) : null;
+            const apiKeyInput = card ? card.querySelector(`input[name="${provider}_api_key"]`) : null;
 
-            // 如果没有设置Base URL，使用默认值
+            let baseUrl = baseUrlInput ? baseUrlInput.value.trim() : '';
+            let apiKey = apiKeyInput ? apiKeyInput.value.trim() : '';
+
             if (!baseUrl) {
-                baseUrl = 'https://api.openai.com/v1';
+                baseUrl = defaultBaseUrls[provider] || 'https://api.openai.com/v1';
             }
 
             // 确保Base URL以/v1结尾
             if (!baseUrl.endsWith('/v1')) {
-                if (baseUrl.endsWith('/')) {
-                    baseUrl += 'v1';
-                } else {
-                    baseUrl += '/v1';
-                }
+                baseUrl = baseUrl.replace(/\/+$/, '') + '/v1';
             }
-
-            // 获取API Key - 优先使用前端页面填写的信息，如果没有则从后端获取
-            const apiKeyInput = document.querySelector('input[name="openai_api_key"]');
-            let apiKey = apiKeyInput ? apiKeyInput.value.trim() : '';
 
             // 如果前端没有填写API Key，尝试从后端获取
             if (!apiKey) {
@@ -4603,8 +4903,8 @@
                     const configResponse = await fetch('/api/config/ai_providers');
                     if (configResponse.ok) {
                         const configResult = await configResponse.json();
-                        if (configResult.success && configResult.config.openai_api_key) {
-                            apiKey = configResult.config.openai_api_key;
+                        if (configResult.success && configResult.config && configResult.config[`${provider}_api_key`]) {
+                            apiKey = configResult.config[`${provider}_api_key`];
                         }
                     }
                 } catch (error) {
@@ -4613,37 +4913,28 @@
             }
 
             if (!apiKey) {
-                showNotification('请先配置 OpenAI API Key', 'warning');
+                showNotification(`请先配置 ${provider} API Key`, 'warning');
                 return;
             }
 
-            // 获取模型列表
             const models = await fetchOpenAIModels(baseUrl, apiKey);
 
             if (models && models.length > 0) {
-                // 转换为搜索选择框的选项格式
                 const options = models.map(model => ({
                     value: model.id,
                     label: model.id
                 }));
 
-                // 保存当前输入框的值
                 const currentValue = inputElement.value;
+                modelSelect.setOptions(options);
 
-                // 设置搜索选择框的选项
-                openaiModelSelect.setOptions(options);
-
-                // 如果当前搜索选择框是隐藏的，显示它并隐藏输入框
                 if (containerElement.style.display === 'none') {
                     containerElement.style.display = 'block';
                     inputElement.style.display = 'none';
-
-                    // 如果有当前值，设置到搜索选择框中
                     if (currentValue) {
-                        openaiModelSelect.setValue(currentValue);
+                        modelSelect.setValue(currentValue);
                     }
                 } else {
-                    // 如果搜索选择框已经显示，切换回输入模式
                     containerElement.style.display = 'none';
                     inputElement.style.display = 'block';
                 }
@@ -4657,10 +4948,9 @@
             console.error('获取模型列表失败:', error);
             showNotification('获取模型列表失败: ' + error.message, 'error');
         } finally {
-            // 恢复按钮状态
             fetchButton.classList.remove('loading');
             fetchButton.disabled = false;
-            fetchButton.textContent = '列表';
+            fetchButton.textContent = '▾';
         }
     }
 
@@ -4756,7 +5046,7 @@
             // 恢复按钮状态
             fetchButton.classList.remove('loading');
             fetchButton.disabled = false;
-            fetchButton.textContent = '列表';
+            fetchButton.textContent = '▾';
         }
     }
 
@@ -4935,12 +5225,14 @@
         }
     }
 
-    // 初始化OpenAI模型输入框状态
-    function initOpenAIModelInput() {
-        const inputElement = document.getElementById('openai_model_input');
-        if (inputElement && !inputElement.value.trim()) {
-            inputElement.placeholder = '选择模型...';
-        }
+    // 初始化OpenAI兼容提供者模型输入框状态
+    function initOpenAICompatibleModelInputs() {
+        ['openai', 'deepseek', 'kimi', 'minimax'].forEach(provider => {
+            const inputElement = document.getElementById(`${provider}_model_input`);
+            if (inputElement && !inputElement.value.trim()) {
+                inputElement.placeholder = '选择模型...';
+            }
+        });
     }
 
     // 页面加载时初始化图片服务选项显示
@@ -4949,7 +5241,7 @@
         setTimeout(() => {
             toggleImageServiceOptions();
             toggleParallelGenerationOptions();
-            initOpenAIModelInput();
+            initOpenAICompatibleModelInputs();
         }, 100);
     });
 </script>

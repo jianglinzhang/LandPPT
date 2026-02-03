@@ -37,6 +37,12 @@ class ConfigService:
             logger.warning(f"Could not load .env file {self.env_file}: {e}")
         except Exception as e:
             logger.warning(f"Error loading .env file {self.env_file}: {e}")
+
+        # Migrate legacy defaults (only when API keys are not configured)
+        try:
+            self._migrate_legacy_ai_defaults()
+        except Exception as e:
+            logger.warning(f"Failed to migrate legacy AI defaults: {e}")
         
         # Configuration schema
         self.config_schema = {
@@ -44,6 +50,19 @@ class ConfigService:
             "openai_api_key": {"type": "password", "category": "ai_providers"},
             "openai_base_url": {"type": "url", "category": "ai_providers", "default": "https://api.openai.com/v1"},
             "openai_model": {"type": "select", "category": "ai_providers", "default": "gpt-4.1"},
+
+            # OpenAI-Compatible Providers
+            "deepseek_api_key": {"type": "password", "category": "ai_providers"},
+            "deepseek_base_url": {"type": "url", "category": "ai_providers", "default": "https://api.deepseek.com/v1"},
+            "deepseek_model": {"type": "text", "category": "ai_providers", "default": "deepseek-chat"},
+
+            "kimi_api_key": {"type": "password", "category": "ai_providers"},
+            "kimi_base_url": {"type": "url", "category": "ai_providers", "default": "https://api.moonshot.cn/v1"},
+            "kimi_model": {"type": "text", "category": "ai_providers", "default": "kimi-k2.5"},
+
+            "minimax_api_key": {"type": "password", "category": "ai_providers"},
+            "minimax_base_url": {"type": "url", "category": "ai_providers", "default": "https://api.minimaxi.com/v1"},
+            "minimax_model": {"type": "text", "category": "ai_providers", "default": "MiniMax-M2.1"},
             
             "anthropic_api_key": {"type": "password", "category": "ai_providers"},
             "anthropic_base_url": {"type": "url", "category": "ai_providers", "default": "https://api.anthropic.com"},
@@ -107,6 +126,10 @@ class ConfigService:
             "research_enable_content_extraction": {"type": "boolean", "category": "generation_params", "default": "true"},
             "research_max_content_length": {"type": "number", "category": "generation_params", "default": "5000"},
             "research_extraction_timeout": {"type": "number", "category": "generation_params", "default": "30"},
+
+            # MinerU API Configuration (for high-quality PDF parsing)
+            "mineru_api_key": {"type": "password", "category": "generation_params"},
+            "mineru_base_url": {"type": "url", "category": "generation_params", "default": "https://mineru.net/api/v4"},
 
             "apryse_license_key": {"type": "password", "category": "generation_params"},
             
@@ -202,6 +225,36 @@ class ConfigService:
         }
         
 
+    def _migrate_legacy_ai_defaults(self) -> None:
+        def _is_empty_env(key: str) -> bool:
+            return not (os.getenv(key) or "").strip()
+
+        updated = False
+
+        # Kimi: moonshot-v1-8k -> kimi-k2.5 (only when API key not configured)
+        if _is_empty_env("KIMI_API_KEY"):
+            if (os.getenv("KIMI_MODEL") or "").strip() == "moonshot-v1-8k":
+                set_key(self.env_file, "KIMI_MODEL", "kimi-k2.5", quote_mode="never")
+                os.environ["KIMI_MODEL"] = "kimi-k2.5"
+                updated = True
+
+        # MiniMax: legacy base URL / model -> new defaults (only when API key not configured)
+        if _is_empty_env("MINIMAX_API_KEY"):
+            if (os.getenv("MINIMAX_BASE_URL") or "").strip() == "https://api.minimax.chat/v1":
+                set_key(self.env_file, "MINIMAX_BASE_URL", "https://api.minimaxi.com/v1", quote_mode="never")
+                os.environ["MINIMAX_BASE_URL"] = "https://api.minimaxi.com/v1"
+                updated = True
+            if (os.getenv("MINIMAX_MODEL") or "").strip() == "MiniMax-Text-01":
+                set_key(self.env_file, "MINIMAX_MODEL", "MiniMax-M2.1", quote_mode="never")
+                os.environ["MINIMAX_MODEL"] = "MiniMax-M2.1"
+                updated = True
+
+        if updated:
+            try:
+                load_dotenv(self.env_file, override=True)
+            except Exception:
+                pass
+
     
     def get_all_config(self) -> Dict[str, Any]:
         """Get all configuration values"""
@@ -221,6 +274,17 @@ class ConfigService:
             
             config[key] = value
         
+        # Ensure UI-visible defaults reflect current recommended values
+        if not (str(config.get("kimi_api_key") or "").strip()):
+            if (str(config.get("kimi_model") or "").strip()) in {"", "moonshot-v1-8k"}:
+                config["kimi_model"] = "kimi-k2.5"
+
+        if not (str(config.get("minimax_api_key") or "").strip()):
+            if (str(config.get("minimax_base_url") or "").strip()) in {"", "https://api.minimax.chat/v1"}:
+                config["minimax_base_url"] = "https://api.minimaxi.com/v1"
+            if (str(config.get("minimax_model") or "").strip()) in {"", "MiniMax-Text-01"}:
+                config["minimax_model"] = "MiniMax-M2.1"
+
         return config
     
     def get_config_by_category(self, category: str) -> Dict[str, Any]:
@@ -241,6 +305,17 @@ class ConfigService:
                         value = value.lower() in ("true", "1", "yes", "on")
                 
                 config[key] = value
+
+        if category == "ai_providers":
+            if not (str(config.get("kimi_api_key") or "").strip()):
+                if (str(config.get("kimi_model") or "").strip()) in {"", "moonshot-v1-8k"}:
+                    config["kimi_model"] = "kimi-k2.5"
+
+            if not (str(config.get("minimax_api_key") or "").strip()):
+                if (str(config.get("minimax_base_url") or "").strip()) in {"", "https://api.minimax.chat/v1"}:
+                    config["minimax_base_url"] = "https://api.minimaxi.com/v1"
+                if (str(config.get("minimax_model") or "").strip()) in {"", "MiniMax-Text-01"}:
+                    config["minimax_model"] = "MiniMax-M2.1"
         
         return config
     

@@ -286,14 +286,23 @@ async def web_ai_config(
     if (isinstance(current_provider, str) and current_provider.strip().lower() == "gemini"):
         current_provider = "google"
 
+    supported_providers = [
+        "openai",
+        "deepseek",
+        "kimi",
+        "minimax",
+        "anthropic",
+        "google",
+        "ollama",
+        "302ai",
+    ]
+
     return templates.TemplateResponse("ai_config.html", {
         "request": request,
         "current_provider": current_provider,
         "available_providers": ai_config.get_available_providers(),
-        "provider_status": {
-            provider: ai_config.is_provider_available(provider)
-            for provider in ai_config.get_available_providers()
-        },
+        "supported_providers": supported_providers,
+        "provider_status": {provider: ai_config.is_provider_available(provider) for provider in supported_providers},
         "current_config": current_config,
         "user": user.to_dict()
     })
@@ -422,8 +431,7 @@ async def test_openai_provider_proxy(
                         "role": "user",
                         "content": "Say 'Hello, I am working!' in exactly 5 words."
                     }
-                ],
-                "temperature": 0
+                ]
             }
             
             async with session.post(chat_url, headers=headers, json=payload, timeout=30) as response:
@@ -514,7 +522,6 @@ async def test_anthropic_provider_proxy(
                     }
                 ],
                 "max_tokens": 1024,
-                "temperature": 0
             }
 
             async with session.post(messages_url, headers=headers, json=payload, timeout=30) as response:
@@ -2016,7 +2023,8 @@ async def stream_stage_response(
                 async for chunk in ppt_service.ai_provider.stream_text_completion(
                     prompt=prompt,
                     max_tokens=2000,
-                    temperature=0.7
+                    temperature=ai_config.temperature,
+                    top_p=ai_config.top_p
                 ):
                     if chunk:
                         yield f"data: {json.dumps({'content': chunk, 'done': False})}\n\n"
@@ -2856,7 +2864,8 @@ async def ai_slide_edit(
         response = await provider.chat_completion(
             messages=messages,
             max_tokens=ai_config.max_tokens,
-            temperature=0.7,
+            temperature=ai_config.temperature,
+            top_p=ai_config.top_p,
             model=settings.get('model')
         )
 
@@ -3011,7 +3020,8 @@ async def ai_slide_edit_stream(
                     async for chunk in provider.stream_chat_completion(
                         messages=messages,
                         max_tokens=ai_config.max_tokens,
-                        temperature=0.7,
+                        temperature=ai_config.temperature,
+                        top_p=ai_config.top_p,
                         model=settings.get('model')
                     ):
                         if chunk:
@@ -3021,7 +3031,8 @@ async def ai_slide_edit_stream(
                     response = await provider.chat_completion(
                         messages=messages,
                         max_tokens=ai_config.max_tokens,
-                        temperature=0.7,
+                        temperature=ai_config.temperature,
+                        top_p=ai_config.top_p,
                         model=settings.get('model')
                     )
                     if response.content:
@@ -3143,7 +3154,8 @@ async def ai_slide_native_dialog_stream(
                     async for chunk in provider.stream_chat_completion(
                         messages=messages,
                         max_tokens=ai_config.max_tokens,
-                        temperature=0.7,
+                        temperature=ai_config.temperature,
+                        top_p=ai_config.top_p,
                         model=settings.get("model"),
                     ):
                         if chunk:
@@ -3153,7 +3165,8 @@ async def ai_slide_native_dialog_stream(
                     response = await provider.chat_completion(
                         messages=messages,
                         max_tokens=ai_config.max_tokens,
-                        temperature=0.7,
+                        temperature=ai_config.temperature,
+                        top_p=ai_config.top_p,
                         model=settings.get("model"),
                     )
                     if response.content:
@@ -3364,7 +3377,8 @@ async def ai_optimize_outline(
         # 调用AI生成回复
         response = await provider.chat_completion(
             messages=messages,
-            temperature=0.7,
+            temperature=ai_config.temperature,
+            top_p=ai_config.top_p,
             model=settings.get('model')
         )
         
@@ -3944,7 +3958,8 @@ async def ai_enhance_bullet_point(
         response = await provider.text_completion(
             prompt=context,
             max_tokens=ai_config.max_tokens // 2,  # 使用较小的token限制
-            temperature=0.7,
+            temperature=ai_config.temperature,
+            top_p=ai_config.top_p,
             model=settings.get('model')
         )
 
@@ -4036,7 +4051,8 @@ async def ai_enhance_all_bullet_points(
         response = await provider.text_completion(
             prompt=context,
             max_tokens=ai_config.max_tokens,  # 使用完整的token限制，因为要处理多个要点
-            temperature=0.7,
+            temperature=ai_config.temperature,
+            top_p=ai_config.top_p,
             model=settings.get('model')
         )
 
@@ -5233,6 +5249,7 @@ async def save_single_slide_content(
 
         data = await request.json()
         html_content = data.get('html_content', '')
+        raw_is_user_edited = data.get('is_user_edited', None)
 
         logger.info(f"📄 接收到HTML内容，长度: {len(html_content)} 字符")
 
@@ -5257,23 +5274,49 @@ async def save_single_slide_content(
         # 获取当前幻灯片数据（如果存在）
         existing_slide = await db_manager.get_single_slide(project_id, slide_index)
         
+        def _parse_bool(value):
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                normalized = value.strip().lower()
+                if normalized in ("true", "1", "yes", "y", "on"):
+                    return True
+                if normalized in ("false", "0", "no", "n", "off"):
+                    return False
+            return None
+
+        client_is_user_edited = _parse_bool(raw_is_user_edited)
+        html_changed = True
+        if existing_slide:
+            html_changed = (existing_slide.get("html_content") != html_content)
+
+        # is_user_edited 优先使用前端传入值；否则：保留既有标记，若HTML有变化则标记为True
+        if client_is_user_edited is None:
+            is_user_edited = (existing_slide.get("is_user_edited", False) if existing_slide else False) or html_changed
+        else:
+            is_user_edited = client_is_user_edited
+
         # 构建要保存的幻灯片数据
         # 保留现有数据的其他字段，只更新html_content和is_user_edited
         if existing_slide:
             slide_data = existing_slide.copy()
             slide_data['html_content'] = html_content
-            slide_data['is_user_edited'] = True
+            slide_data['is_user_edited'] = is_user_edited
+            # 兼容字段：DatabaseService.save_single_slide 使用 content_type
+            if 'content_type' not in slide_data:
+                slide_data['content_type'] = slide_data.get('slide_type', 'content')
         else:
             # 如果幻灯片不存在（理论上不应该发生，但做防御处理）
             slide_data = {
                 "page_number": slide_index + 1,
                 "title": f"Slide {slide_index + 1}",
                 "html_content": html_content,
-                "is_user_edited": True
+                "content_type": "content",
+                "is_user_edited": is_user_edited
             }
 
         logger.debug(f"📝 更新第 {slide_index + 1} 页的内容")
-        logger.debug(f"📊 幻灯片数据: 标题='{slide_data.get('title', '无标题')}', 用户编辑=True, 索引={slide_index}")
+        logger.debug(f"📊 幻灯片数据: 标题='{slide_data.get('title', '无标题')}', 用户编辑={is_user_edited}, 索引={slide_index}")
 
         # 只保存这一个幻灯片到数据库，不影响其他幻灯片
         save_success = await db_manager.save_single_slide(project_id, slide_index, slide_data)
@@ -5518,6 +5561,68 @@ async def export_project_pdf(project_id: str, individual: bool = False):
     except HTTPException:
         raise
     except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.post("/api/projects/{project_id}/slides/{slide_index}/user-edited")
+async def set_slide_user_edited_status(
+    project_id: str,
+    slide_index: int,
+    request: Request,
+    user: User = Depends(get_current_user_required)
+):
+    """更新单个幻灯片的 is_user_edited 状态（用于修复误标记导致生成跳过保存的问题）"""
+    try:
+        data = await request.json()
+
+        def _parse_bool(value):
+            if isinstance(value, bool):
+                return value
+            if isinstance(value, str):
+                normalized = value.strip().lower()
+                if normalized in ("true", "1", "yes", "y", "on"):
+                    return True
+                if normalized in ("false", "0", "no", "n", "off"):
+                    return False
+            return None
+
+        is_user_edited = _parse_bool(data.get("is_user_edited", None))
+        if is_user_edited is None:
+            raise HTTPException(status_code=400, detail="is_user_edited must be a boolean")
+
+        # Ensure project exists
+        project = await ppt_service.project_manager.get_project(project_id)
+        if not project:
+            raise HTTPException(status_code=404, detail="Project not found")
+
+        if slide_index < 0:
+            raise HTTPException(status_code=400, detail=f"Slide index cannot be negative: {slide_index}")
+
+        from ..database.database import AsyncSessionLocal
+        from ..database.repositories import SlideDataRepository, ProjectRepository
+
+        session = AsyncSessionLocal()
+        try:
+            slide_repo = SlideDataRepository(session)
+            updated = await slide_repo.update_slide_user_edited_status(project_id, slide_index, is_user_edited=is_user_edited)
+
+            # Fallback: if slide_data table没有该页，尝试更新projects.slides_data字段
+            if not updated:
+                project_repo = ProjectRepository(session)
+                db_project = await project_repo.get_by_id(project_id)
+                if db_project and db_project.slides_data and slide_index < len(db_project.slides_data):
+                    db_project.slides_data[slide_index]["is_user_edited"] = is_user_edited
+                    await project_repo.update(project_id, {"slides_data": db_project.slides_data})
+                    updated = True
+
+            return {"success": bool(updated), "is_user_edited": is_user_edited}
+        finally:
+            await session.close()
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"Error setting slide user edited status for project {project_id} slide {slide_index}: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 @router.get("/api/projects/{project_id}/export/pdf/individual")
@@ -7092,7 +7197,11 @@ async def _process_uploaded_files_for_outline(
                 saved_file_paths.append(project_file_path)
 
                 # 处理单个文件内容
-                file_result = await file_processor.process_file(project_file_path, file_upload.filename)
+                file_result = await file_processor.process_file(
+                    project_file_path,
+                    file_upload.filename,
+                    file_processing_mode=file_processing_mode,
+                )
                 all_processed_content.append({
                     "filename": file_upload.filename,
                     "content": file_result.processed_content
@@ -7124,7 +7233,8 @@ async def _process_uploaded_files_for_outline(
                     topic=topic,
                     language=language,
                     file_paths=saved_file_paths,
-                    context=context
+                    context=context,
+                    file_processing_mode=file_processing_mode,
                 )
 
                 merged_filename = f"merged_with_search_{len(files)}_files.md"
